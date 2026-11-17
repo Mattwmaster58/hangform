@@ -1,0 +1,1418 @@
+<!doctype html>
+<!-- Single-file build. Edit src/ and run "npm run build" to regenerate. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f3f1eb">
+  <title>Hangform — Parametric Hook</title>
+  <style>
+    :root {
+      --paper: #f3f1eb;
+      --panel: #ffffff;
+      --ink: #20302b;
+      --muted: #6c7772;
+      --line: #dfe2dc;
+      --soft: #f7f8f5;
+      --accent: #e66a42;
+      --accent-dark: #bd4c2b;
+      --accent-soft: #fff0e9;
+      --green: #326c58;
+      --shadow: 0 12px 35px rgba(35, 48, 42, .06);
+    }
+
+    * { box-sizing: border-box; }
+    html { color-scheme: light; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, input:focus-visible {
+      outline: 3px solid rgba(230, 106, 66, .24);
+      outline-offset: 2px;
+    }
+
+    .shell { max-width: 1380px; margin: 0 auto; padding: 0 32px 30px; }
+    .page-title {
+      margin: 0;
+      padding: 34px 0 26px;
+      font-size: clamp(30px, 3.4vw, 45px);
+      line-height: 1.04;
+      letter-spacing: -.045em;
+      font-weight: 730;
+    }
+
+    .workspace { display: grid; grid-template-columns: 326px minmax(0, 1fr); gap: 20px; align-items: stretch; }
+    .card { background: var(--panel); border: 1px solid rgba(66, 82, 73, .11); border-radius: 18px; box-shadow: var(--shadow); }
+    .controls { padding: 22px 22px 18px; }
+    .panel-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .panel-heading h2, .preview-heading h2 { margin: 0; font-size: 16px; letter-spacing: -.02em; }
+    .reset-button {
+      border: 0; background: transparent; color: var(--muted); padding: 5px 0 5px 8px;
+      font-size: 12px; font-weight: 650; cursor: pointer;
+    }
+    .reset-button:hover { color: var(--accent-dark); }
+    .group-label {
+      margin: 18px 0 7px; color: #89928d; font-size: 10px; line-height: 1;
+      font-weight: 800; letter-spacing: .14em; text-transform: uppercase;
+    }
+    .parameter { padding: 9px 0 8px; }
+    .parameter + .parameter { border-top: 1px solid #eff0ed; }
+    .parameter-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .parameter label { font-size: 13px; font-weight: 620; }
+    .number-wrap { position: relative; flex: 0 0 84px; }
+    .number-wrap input {
+      width: 100%; height: 31px; padding: 4px 28px 4px 8px; border: 1px solid var(--line); border-radius: 7px;
+      background: var(--soft); color: var(--ink); text-align: right; font-size: 12px; font-weight: 680;
+      font-variant-numeric: tabular-nums; appearance: textfield;
+    }
+    .number-wrap input::-webkit-inner-spin-button, .number-wrap input::-webkit-outer-spin-button { appearance: none; margin: 0; }
+    .number-wrap span { position: absolute; right: 8px; top: 8px; color: #929a96; font-size: 10px; pointer-events: none; }
+    .range {
+      --fill: 50%;
+      display: block; width: 100%; height: 16px; margin: 5px 0 0; padding: 0;
+      background: transparent; cursor: pointer; appearance: none;
+    }
+    .range::-webkit-slider-runnable-track {
+      height: 3px; border-radius: 4px;
+      background: linear-gradient(to right, var(--accent) 0 var(--fill), #e6e8e3 var(--fill) 100%);
+    }
+    .range::-moz-range-track { height: 3px; border-radius: 4px; background: #e6e8e3; }
+    .range::-moz-range-progress { height: 3px; border-radius: 4px; background: var(--accent); }
+    .range::-webkit-slider-thumb {
+      appearance: none; width: 13px; height: 13px; margin-top: -5px; border-radius: 50%;
+      background: white; border: 3px solid var(--accent); box-shadow: 0 1px 3px rgba(60, 50, 40, .15);
+    }
+    .range::-moz-range-thumb { width: 9px; height: 9px; border-radius: 50%; background: white; border: 3px solid var(--accent); }
+
+    .preview { min-width: 0; padding: 20px; display: flex; flex-direction: column; }
+    .preview-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+    .view-tabs { display: flex; gap: 3px; padding: 3px; border-radius: 9px; background: #eff1ec; }
+    .view-tab {
+      border: 0; border-radius: 7px; background: transparent; padding: 7px 12px; color: var(--muted);
+      font-size: 11px; font-weight: 700; cursor: pointer;
+    }
+    .view-tab[aria-pressed="true"] { color: var(--ink); background: white; box-shadow: 0 1px 4px rgba(30, 45, 38, .09); }
+    .stage {
+      position: relative; flex: 1; min-height: 445px; overflow: hidden; border: 1px solid #e3e6df; border-radius: 13px;
+      background-color: #f8f9f6;
+      background-image: linear-gradient(rgba(91, 108, 98, .055) 1px, transparent 1px), linear-gradient(90deg, rgba(91, 108, 98, .055) 1px, transparent 1px);
+      background-size: 28px 28px;
+    }
+    .stage::after {
+      content: ""; position: absolute; inset: 0; pointer-events: none;
+      box-shadow: inset 0 0 70px rgba(248, 249, 246, .65);
+    }
+    .stage-label {
+      position: absolute; z-index: 3; left: 16px; top: 14px; display: flex; align-items: center; gap: 7px;
+      color: #87918c; font-size: 9px; font-weight: 800; letter-spacing: .14em; pointer-events: none;
+    }
+    .stage-label::before { content: ""; width: 14px; height: 1px; background: #a8b0ab; }
+    .units-badge {
+      position: absolute; z-index: 3; right: 14px; top: 12px; padding: 5px 7px; border: 1px solid #e0e3dd;
+      border-radius: 6px; background: rgba(255,255,255,.75); color: #87918c; font-size: 9px; font-weight: 750;
+    }
+    #profileSvg { display: block; width: 100%; height: 100%; min-height: 445px; position: absolute; inset: 0; z-index: 1; }
+    #meshCanvas { display: none; width: 100%; height: 100%; position: absolute; inset: 0; z-index: 1; cursor: grab; touch-action: none; }
+    #meshCanvas:active { cursor: grabbing; }
+    .stage[data-view="3d"] #profileSvg { display: none; }
+    .stage[data-view="3d"] #meshCanvas { display: block; }
+    .view-help {
+      position: absolute; z-index: 3; bottom: 12px; left: 50%; transform: translateX(-50%); white-space: nowrap;
+      color: #8a938e; font-size: 9px; pointer-events: none;
+    }
+    .stage[data-view="side"] .view-help { display: none; }
+    .stage-toggles { position: absolute; z-index: 4; bottom: 11px; right: 12px; display: flex; align-items: center; gap: 14px; }
+    .stage-toggle { display: flex; align-items: center; gap: 6px; color: #7e8983; font-size: 9px; cursor: pointer; user-select: none; }
+    .stage-toggle input { accent-color: var(--accent); width: 12px; height: 12px; margin: 0; cursor: pointer; }
+    .stage[data-view="3d"] #dimensionToggleWrap { display: none; }
+
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0; }
+    .stat { padding: 10px 12px; border: 1px solid #e6e8e3; border-radius: 9px; background: #fbfcf9; }
+    .stat-label { display: block; margin-bottom: 3px; color: #8a938e; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+    .stat-value { font-size: 15px; font-weight: 720; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+    .stat-value small { color: #89928d; font-size: 9px; font-weight: 650; letter-spacing: 0; }
+
+    .strain { margin: 0 0 12px; padding: 10px 12px 7px; border: 1px solid #e6e8e3; border-radius: 9px; background: #fbfcf9; }
+    .strain-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .strain-title { color: #8a938e; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+    .strain-title i { font-style: normal; font-weight: 600; letter-spacing: .02em; text-transform: none; color: #a6ada9; }
+    .strain-reading { display: flex; align-items: baseline; gap: 8px; }
+    .strain-reading b { font-size: 15px; font-weight: 720; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+    .strain-verdict { font-size: 8px; font-weight: 750; text-transform: uppercase; letter-spacing: .07em; }
+    .strain-track {
+      position: relative; height: 6px; margin: 9px 0 0; border-radius: 3px;
+      background: linear-gradient(90deg, #cfe3d5 0 42.857%, #f2e2c4 42.857% 71.429%, #f3d4cc 71.429% 100%);
+    }
+    .strain-marker {
+      position: absolute; top: -5px; width: 2px; height: 16px; border-radius: 1px;
+      background: var(--ink); transform: translateX(-50%);
+    }
+    .strain-marker::after {
+      content: ""; position: absolute; left: 50%; top: -2px; width: 8px; height: 8px;
+      border-radius: 50%; background: var(--ink); transform: translateX(-50%);
+    }
+    .strain-tick { position: absolute; top: -2px; width: 1px; height: 10px; background: rgba(32, 48, 43, .26); }
+    .strain-legend { position: relative; height: 11px; margin-top: 3px; }
+    .strain-legend span {
+      position: absolute; transform: translateX(-50%); white-space: nowrap;
+      color: #8a938e; font-size: 8px; font-weight: 650;
+    }
+    .strain .ok { color: #326c58; }
+    .strain .warn { color: #9a6a16; }
+    .strain .bad { color: #bd4c2b; }
+    .strain .none { color: #8a938e; }
+
+    .export-row { display: flex; align-items: center; justify-content: flex-end; gap: 9px; }
+    .button {
+      display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 37px;
+      padding: 8px 13px; border-radius: 8px; border: 1px solid var(--line); background: white;
+      font-size: 11px; font-weight: 720; cursor: pointer; white-space: nowrap;
+    }
+    .button:hover { border-color: #c5cbc4; background: #fafbf8; }
+    .button.primary { background: var(--ink); border-color: var(--ink); color: white; }
+    .button.primary:hover { background: #31443d; }
+    .toast {
+      position: fixed; z-index: 20; left: 50%; bottom: 24px; transform: translate(-50%, 15px);
+      padding: 10px 15px; border-radius: 9px; background: var(--ink); color: white; font-size: 12px;
+      opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; box-shadow: 0 8px 24px rgba(20,30,25,.18);
+    }
+    .toast.visible { opacity: 1; transform: translate(-50%, 0); }
+
+    @media (max-width: 920px) {
+      .shell { padding: 0 20px 24px; }
+      .workspace { grid-template-columns: 285px minmax(0, 1fr); }
+      .controls { padding: 18px; }
+      .preview { padding: 16px; }
+    }
+    @media (max-width: 720px) {
+      .shell { padding: 0 14px 20px; }
+      .page-title { padding: 24px 0 18px; }
+      .workspace { grid-template-columns: 1fr; }
+      .preview { order: -1; }
+      .stage, #profileSvg { min-height: 390px; }
+      .controls { padding: 20px; }
+      .stats { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 430px) {
+      .stage-label { display: none; }
+      .view-tab { padding: 7px 9px; }
+      .stage, #profileSvg { min-height: 340px; }
+      .stats { gap: 5px; }
+      .stat { padding: 9px 8px; }
+      .stat-value { font-size: 13px; }
+      .button { padding: 8px 10px; }
+      .view-help { left: 14px; transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <main>
+      <h1 class="page-title">A hook that fits.</h1>
+
+      <div class="workspace">
+        <aside class="controls card" aria-label="Hook parameters">
+          <div class="panel-heading">
+            <h2>Parameters</h2>
+            <button class="reset-button" id="resetButton" type="button">Reset defaults</button>
+          </div>
+          <div id="parameterControls"></div>
+        </aside>
+
+        <section class="preview card" aria-label="Hook preview and export">
+          <div class="preview-heading">
+            <h2>Live preview</h2>
+            <div class="view-tabs" role="group" aria-label="Preview mode">
+              <button class="view-tab" id="sideTab" type="button" aria-pressed="true">Side profile</button>
+              <button class="view-tab" id="meshTab" type="button" aria-pressed="false">3D model</button>
+            </div>
+          </div>
+
+          <div class="stage" id="stage" data-view="side">
+            <div class="stage-label" id="stageLabel">SIDE ELEVATION</div>
+            <div class="units-badge">MILLIMETERS</div>
+            <svg id="profileSvg" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Dimensioned side profile of the parametric hook">
+              <defs>
+                <filter id="profileShadow" x="-30%" y="-30%" width="160%" height="160%">
+                  <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#6b3d2b" flood-opacity=".13"/>
+                </filter>
+                <marker id="dimensionArrow" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto-start-reverse" markerUnits="strokeWidth">
+                  <path d="M6 0 0 3l6 3" fill="none" stroke="#7f8b85" stroke-width="1"/>
+                </marker>
+              </defs>
+              <path id="hookProfile" fill="#e66a42" stroke="#bd4c2b" stroke-width=".65" stroke-linejoin="round" filter="url(#profileShadow)"/>
+              <g id="bananaGroup" fill="none" stroke="none"></g>
+              <g id="dimensions" fill="#68766f" stroke="#7f8b85" stroke-width=".55" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="4.2"></g>
+            </svg>
+            <canvas id="meshCanvas" aria-label="Interactive 3D preview. Drag to rotate and scroll to zoom."></canvas>
+            <div class="view-help" id="viewHelp">Drag to rotate · Scroll to zoom · Double-click to reset</div>
+            <div class="stage-toggles">
+              <label class="stage-toggle" id="bananaToggleWrap"><input id="bananaToggle" type="checkbox"> Banana for scale</label>
+              <label class="stage-toggle" id="dimensionToggleWrap"><input id="dimensionToggle" type="checkbox" checked> Dimensions</label>
+            </div>
+          </div>
+
+          <div class="stats" aria-label="Calculated dimensions">
+            <div class="stat"><span class="stat-label">Overall width</span><span class="stat-value" id="overallWidth">—</span></div>
+            <div class="stat"><span class="stat-label">Overall height</span><span class="stat-value" id="overallHeight">—</span></div>
+            <div class="stat"><span class="stat-label">Mouth gap</span><span class="stat-value" id="mouthGap">—</span></div>
+            <div class="stat"><span class="stat-label">Material volume</span><span class="stat-value" id="materialVolume">—</span></div>
+          </div>
+
+          <div class="strain" id="strainPanel" title="Estimated root bending strain for a zero-clearance panel: the back leg tip must deflect by the mouth underfit, treated as a fixed-root cantilever.">
+            <div class="strain-head">
+              <span class="strain-title">Clamp strain <i>zero clearance</i></span>
+              <span class="strain-reading"><b id="strainValue">—</b><span class="strain-verdict" id="strainVerdict">—</span></span>
+            </div>
+            <div class="strain-track">
+              <span class="strain-marker" id="strainMarker"></span>
+              <span class="strain-tick" style="left:42.857%"></span>
+              <span class="strain-tick" style="left:71.429%"></span>
+            </div>
+            <div class="strain-legend">
+              <span style="left:42.857%">PLA 1.5%</span>
+              <span style="left:71.429%">PETG 2.5%</span>
+            </div>
+          </div>
+
+          <div class="export-row">
+            <button class="button" id="svgButton" type="button">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2v8m0 0 3-3m-3 3L5 7M3 12v2h10v-2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Export SVG
+            </button>
+            <button class="button primary" id="stlButton" type="button">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2v8m0 0 3-3m-3 3L5 7M3 12v2h10v-2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Export STL
+            </button>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+(() => {
+  "use strict";
+
+  const definitions = [
+    { key: "roofWidth", label: "Roof clear width", group: "Support fit", min: 4, max: 100, step: 1, value: 40 },
+    { key: "backLeg", label: "Back leg length", group: "Support fit", min: 10, max: 80, step: 1, value: 28 },
+    { key: "backAngle", label: "Back leg angle", group: "Support fit", min: 85, max: 90, step: 0.5, value: 89, unit: "°" },
+    { key: "frontLeg", label: "Front leg length", group: "Hook geometry", min: 45, max: 240, step: 1, value: 120 },
+    { key: "hookRadius", label: "Hook inside radius", group: "Hook geometry", min: 6, max: 50, step: 1, value: 18 },
+    { key: "thickness", label: "Profile thickness", group: "Stock", min: 1, max: 12, step: 0.5, value: 5 },
+    { key: "outWidth", label: "Out-of-plane width", group: "Stock", min: 3, max: 60, step: 1, value: 20 },
+    { key: "cornerRadius", label: "Upper outer radius", group: "Edges & tip", min: 0, max: 30, step: 1, value: 0 },
+    { key: "edgeRadius", label: "Outer edge radius", group: "Edges & tip", min: 0, max: 6, step: 0.5, value: 1.5 },
+    { key: "tipRadius", label: "Tip radius", group: "Edges & tip", min: 0, max: 6, step: 0.5, value: 2.5 },
+    { key: "tipEdgeRadius", label: "Tip edge radius", group: "Edges & tip", min: 0, max: 12, step: 0.5, value: 3 }
+  ];
+  const byKey = Object.fromEntries(definitions.map(d => [d.key, d]));
+  const defaults = Object.fromEntries(definitions.map(d => [d.key, d.value]));
+  const state = { ...defaults };
+  let mode = "side";
+  let showDimensions = true;
+  let showBanana = false;
+  let currentGeometry = null;
+  let sliceCache = { key: "", value: null };
+  let meshCache = { key: "", value: null };
+  let toastTimer;
+
+  const controlsRoot = document.getElementById("parameterControls");
+  const profileSvg = document.getElementById("profileSvg");
+  const hookProfile = document.getElementById("hookProfile");
+  const bananaGroup = document.getElementById("bananaGroup");
+  const dimensions = document.getElementById("dimensions");
+  const stage = document.getElementById("stage");
+  const canvas = document.getElementById("meshCanvas");
+
+  // Standard Cavendish banana for scale: 178 mm height, ~56 mm curved span, 32 mm max diameter.
+  const BANANA_HEIGHT = 178;
+  const BANANA_WIDTH = 56;
+  const BANANA_RADIUS = 16;
+
+  function bananaProfileAt(u) {
+    // u in [0, 1] from stem top (y = 0) to blossom tip (y = 178 mm).
+    const y = u * BANANA_HEIGHT;
+    const bow = Math.sin(Math.PI * u);
+    const xCenter = 16 + 22 * Math.pow(bow, 1.15);
+    let r;
+    if (u < 0.08) {
+      r = 3.2 + 2.2 * (u / 0.08);
+    } else if (u < 0.92) {
+      const t = (u - 0.08) / 0.84;
+      r = 4.5 + (BANANA_RADIUS - 4.5) * Math.pow(Math.sin(Math.PI * t), 0.72);
+    } else {
+      const t = (u - 0.92) / 0.08;
+      r = 4.5 * (1 - 0.55 * t);
+    }
+    return { u, y, xCenter, r };
+  }
+
+  function buildBanana2D(offsetX) {
+    const N = 48;
+    const samples = [];
+    for (let i = 0; i <= N; i++) {
+      const s = bananaProfileAt(i / N);
+      let dy = 1, dx = 0;
+      if (i > 0 && i < N) {
+        const prev = bananaProfileAt((i - 1) / N);
+        const next = bananaProfileAt((i + 1) / N);
+        dx = next.xCenter - prev.xCenter;
+        dy = next.y - prev.y;
+      }
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = dy / len, ny = -dx / len;
+      samples.push({ ...s, nx, ny });
+    }
+    const outer = samples.map(s => [offsetX + s.xCenter + s.r * s.nx, s.y + s.r * s.ny]);
+    const inner = samples.slice().reverse().map(s => [offsetX + s.xCenter - s.r * s.nx, s.y - s.r * s.ny]);
+    const ridge = samples.slice(4, N - 3).map(s => [offsetX + s.xCenter + s.r * 0.28 * s.nx, s.y + s.r * 0.28 * s.ny]);
+    const ptsToPath = (pts, close) => pts.map((p, idx) => `${idx === 0 ? "M" : "L"} ${fmt(p[0])} ${fmt(p[1])}`).join(" ") + (close ? " Z" : "");
+
+    const bodyPath = ptsToPath([...outer, ...inner], true);
+    const ridgePath = ptsToPath(ridge, false);
+    const stemSamples = samples.slice(0, 5);
+    const stemOuter = stemSamples.map(s => [offsetX + s.xCenter + s.r * s.nx, s.y + s.r * s.ny]);
+    const stemInner = stemSamples.slice().reverse().map(s => [offsetX + s.xCenter - s.r * s.nx, s.y - s.r * s.ny]);
+    const stemPath = ptsToPath([...stemOuter, ...stemInner], true);
+
+    const tipSamples = samples.slice(N - 2);
+    const tipOuter = tipSamples.map(s => [offsetX + s.xCenter + s.r * s.nx, s.y + s.r * s.ny]);
+    const tipInner = tipSamples.slice().reverse().map(s => [offsetX + s.xCenter - s.r * s.nx, s.y - s.r * s.ny]);
+    const tipPath = ptsToPath([...tipOuter, ...tipInner], true);
+
+    const labelX = offsetX + 26;
+    return `
+      <g filter="url(#profileShadow)">
+        <path d="${bodyPath}" fill="#f4ca3b" stroke="#b98f14" stroke-width=".65" stroke-linejoin="round"/>
+        <path d="${ridgePath}" fill="none" stroke="#fae17c" stroke-width="1.2" stroke-linecap="round"/>
+        <path d="${stemPath}" fill="#7c6c2b" stroke="#5e511e" stroke-width=".5" stroke-linejoin="round"/>
+        <path d="${tipPath}" fill="#5b4322" stroke="#463218" stroke-width=".45" stroke-linejoin="round"/>
+      </g>
+      <text x="${fmt(labelX)}" y="${fmt(BANANA_HEIGHT + 7)}" fill="#8a7424" stroke="none" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="3.9" text-anchor="middle">178 · BANANA</text>
+    `;
+  }
+
+  function buildBananaMesh(g, centerX, centerY) {
+    const gap = showDimensions ? 34 : 20;
+    const offsetX = g.maxX + gap;
+    const N = 34;
+    const M = 5; // pentagonal cross-section (classic 5-ridge Cavendish)
+    const rings = [];
+    for (let i = 0; i <= N; i++) {
+      const s = bananaProfileAt(i / N);
+      let dx = 0, dy = 1;
+      if (i > 0 && i < N) {
+        const prev = bananaProfileAt((i - 1) / N);
+        const next = bananaProfileAt((i + 1) / N);
+        dx = next.xCenter - prev.xCenter;
+        dy = next.y - prev.y;
+      }
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = dy / len, ny = -dx / len;
+      const ring = [];
+      for (let j = 0; j < M; j++) {
+        const a = (j / M) * Math.PI * 2;
+        const ca = Math.cos(a), sa = Math.sin(a);
+        const px = offsetX + s.xCenter + s.r * ca * nx;
+        const py = s.y + s.r * ca * ny;
+        const pz = s.r * 0.92 * sa;
+        ring.push([px - centerX, centerY - py, pz]);
+      }
+      const center = [offsetX + s.xCenter - centerX, centerY - s.y, 0];
+      rings.push({ ring, center, u: s.u });
+    }
+    const tris = [];
+    const stemColor = [0.49, 0.43, 0.17];
+    const bodyColor = [0.95, 0.78, 0.22];
+    const tipColor = [0.36, 0.26, 0.13];
+    for (let i = 0; i < N; i++) {
+      const r0 = rings[i].ring, r1 = rings[i + 1].ring;
+      const uMid = (rings[i].u + rings[i + 1].u) / 2;
+      const col = uMid < 0.08 ? stemColor : (uMid > 0.94 ? tipColor : bodyColor);
+      for (let j = 0; j < M; j++) {
+        const k = (j + 1) % M;
+        tris.push({ pts: [r0[j], r1[j], r1[k]], color: col });
+        tris.push({ pts: [r0[j], r1[k], r0[k]], color: col });
+      }
+    }
+    const top = rings[0];
+    for (let j = 0; j < M; j++) {
+      const k = (j + 1) % M;
+      tris.push({ pts: [top.center, top.ring[k], top.ring[j]], color: stemColor });
+    }
+    const bot = rings[N];
+    for (let j = 0; j < M; j++) {
+      const k = (j + 1) % M;
+      tris.push({ pts: [bot.center, bot.ring[j], bot.ring[k]], color: tipColor });
+    }
+    return tris;
+  }
+
+  const fmt = (value, digits = 2) => Number(value.toFixed(digits)).toString();
+  const DEG = Math.PI / 180;
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+  // Reference working strains for printed parts (roughly the elastic limit).
+  const PLA_STRAIN = 0.015;
+  const PETG_STRAIN = 0.025;
+  const STRAIN_SCALE = 0.035;
+
+  function limitFor(key, s) {
+    const t = s.thickness;
+    if (key === "cornerRadius") return { min: 0, max: t };
+    if (key === "edgeRadius") return { min: 0, max: Math.min(s.outWidth / 2, t / 2) };
+    if (key === "tipRadius") return { min: 0, max: t / 2 };
+    if (key === "tipEdgeRadius") return { min: 0, max: Math.min(s.outWidth / 2, t) };
+    if (key === "backAngle") {
+      const ratio = clamp((s.roofWidth - 1.5) / s.backLeg, 0, 0.9);
+      const maxTilt = Math.asin(ratio) / DEG;
+      const rawMin = 90 - maxTilt;
+      return { min: Math.min(90, Math.ceil(rawMin / 0.5) * 0.5), max: 90 };
+    }
+    const def = byKey[key];
+    return { min: def.min, max: def.max };
+  }
+
+  function clampState() {
+    for (const def of definitions) {
+      const lim = limitFor(def.key, state);
+      const lo = Math.max(def.min, lim.min);
+      const hi = Math.min(def.max, lim.max);
+      if (!Number.isFinite(state[def.key])) state[def.key] = defaults[def.key];
+      state[def.key] = clamp(state[def.key], lo, Math.max(lo, hi));
+    }
+  }
+
+  function buildControls() {
+    let html = "";
+    let lastGroup = "";
+    for (const def of definitions) {
+      if (def.group !== lastGroup) {
+        html += `<div class="group-label">${def.group}</div>`;
+        lastGroup = def.group;
+      }
+      const unit = def.unit || "mm";
+      const spoken = unit === "°" ? "degrees" : "millimeters";
+      html += `
+        <div class="parameter">
+          <div class="parameter-top">
+            <label for="number-${def.key}">${def.label}</label>
+            <div class="number-wrap">
+              <input id="number-${def.key}" data-key="${def.key}" type="number" min="${def.min}" max="${def.max}" step="${def.step}" value="${def.value}" aria-label="${def.label} in ${spoken}">
+              <span>${unit}</span>
+            </div>
+          </div>
+          <input class="range" id="range-${def.key}" data-key="${def.key}" type="range" min="${def.min}" max="${def.max}" step="${def.step}" value="${def.value}" aria-label="${def.label} slider">
+        </div>`;
+    }
+    controlsRoot.innerHTML = html;
+
+    controlsRoot.querySelectorAll(".range").forEach(input => {
+      input.addEventListener("input", () => {
+        state[input.dataset.key] = Number(input.value);
+        render();
+      });
+    });
+    controlsRoot.querySelectorAll('input[type="number"]').forEach(input => {
+      input.addEventListener("change", () => {
+        const def = byKey[input.dataset.key];
+        const lim = limitFor(def.key, state);
+        const lo = Math.max(def.min, lim.min);
+        const hi = Math.min(def.max, lim.max);
+        const parsed = Number(input.value);
+        state[def.key] = Number.isFinite(parsed) ? clamp(parsed, lo, Math.max(lo, hi)) : defaults[def.key];
+        render();
+      });
+    });
+  }
+
+  function buildGeometry(s) {
+    const t = s.thickness;
+    const R = clamp(s.cornerRadius, 0, t);
+    const ro = clamp(s.edgeRadius, 0, Math.min(s.outWidth / 2, t / 2));
+    const rt = clamp(s.tipRadius, 0, t / 2);
+    const re = clamp(s.tipEdgeRadius, 0, Math.min(s.outWidth / 2, t));
+    const W = s.roofWidth;
+    const B = s.backLeg;
+    const F = s.frontLeg;
+    const r = s.hookRadius;
+    const innerFrontX = W;
+    const cx = innerFrontX + r + t;
+    const cy = t + F;
+    const minX = -t;
+    const maxX = cx + r + t;
+    const hookBottomY = cy + r + t;
+
+    // Back leg leans toward the front leg as the angle drops below 90 degrees.
+    const angle = clamp(s.backAngle, 0, 90);
+    let delta = (90 - angle) * DEG;
+    const maxSin = Math.max(0, (W - 1) / B);
+    if (Math.sin(delta) > maxSin) delta = Math.asin(Math.min(1, maxSin));
+    const sinD = Math.sin(delta);
+    const cosD = Math.cos(delta);
+    const backInnerBottom = { x: B * sinD, y: t + B * cosD };
+    const backOuterBottom = { x: -t + B * sinD, y: t + B * cosD };
+    const maxY = Math.max(hookBottomY, backInnerBottom.y);
+    const mouthGap = W - B * sinD;
+
+    return {
+      W, B, F, r, t, R, ro, rt, re, cx, cy, innerFrontX,
+      minX, maxX, maxY, mouthGap,
+      backLegAngle: angle, delta, sinD, cosD,
+      backInnerBottom, backOuterBottom,
+      outWidth: s.outWidth
+    };
+  }
+
+  function buildCommands(g, theta, outSetback = 0) {
+    const s = Math.min(outSetback, g.t * 0.495);
+    const t = g.t;
+    const te = Math.max(0.1, t - 2 * s);
+    const R = Math.max(0, g.R - s);
+    const { W, F, r, cx, cy, B, sinD, cosD } = g;
+    const rIn = r + s;
+    const rOut = r + t - s;
+    const rt = Math.min(g.rt, te / 2);
+    const innerFrontX = g.innerFrontX;
+    const outerTopX = -t + s;
+    const outerBottom = { x: outerTopX + B * sinD, y: t + B * cosD };
+    const innerBottom = g.backInnerBottom;
+    const cmds = [];
+    const addM = (x, y) => cmds.push({ type: "M", x, y });
+    const addL = (x, y) => cmds.push({ type: "L", x, y });
+    const addA = (ax, ay, rad, a0, a1, ccw, n) => cmds.push({ type: "A", cx: ax, cy: ay, r: rad, a0, a1, ccw, n });
+
+    addM(outerBottom.x, outerBottom.y);
+    addL(outerTopX, t);
+    if (s + R < t - 1e-9) addL(outerTopX, s + R);
+    if (R > 1e-9) addA(outerTopX + R, s + R, R, Math.PI, Math.PI * 1.5, false, 10);
+    addL(innerFrontX + t - s - R, s);
+    if (R > 1e-9) addA(innerFrontX + t - s - R, s + R, R, -Math.PI / 2, 0, false, 10);
+    addL(innerFrontX + t - s, cy);
+
+    const a1 = Math.atan2(rt, rIn + rt);
+    const a2 = Math.atan2(rt, rOut - rt);
+    const L1 = Math.hypot(rIn + rt, rt);
+    const L2 = Math.hypot(rOut - rt, rt);
+
+    addA(cx, cy, rIn, Math.PI, theta + a1, true, 40);
+
+    const erx = Math.cos(theta), ery = Math.sin(theta);
+    const etx = -Math.sin(theta), ety = Math.cos(theta);
+
+    if (rt > 1e-9) {
+      const c1x = cx + (rIn + rt) * erx + rt * etx;
+      const c1y = cy + (rIn + rt) * ery + rt * ety;
+      const t1x = cx + rIn * (c1x - cx) / L1;
+      const t1y = cy + rIn * (c1y - cy) / L1;
+      const e1x = cx + (rIn + rt) * erx;
+      const e1y = cy + (rIn + rt) * ery;
+      addA(c1x, c1y, rt, Math.atan2(t1y - c1y, t1x - c1x), Math.atan2(e1y - c1y, e1x - c1x), false, 8);
+
+      const c2x = cx + (rOut - rt) * erx + rt * etx;
+      const c2y = cy + (rOut - rt) * ery + rt * ety;
+      const t2x = cx + rOut * (c2x - cx) / L2;
+      const t2y = cy + rOut * (c2y - cy) / L2;
+      const e2x = cx + (rOut - rt) * erx;
+      const e2y = cy + (rOut - rt) * ery;
+      if (Math.hypot(e2x - e1x, e2y - e1y) > 1e-9) addL(e2x, e2y);
+      addA(c2x, c2y, rt, Math.atan2(e2y - c2y, e2x - c2x), Math.atan2(t2y - c2y, t2x - c2x), false, 8);
+    } else {
+      addL(cx + rOut * erx, cy + rOut * ery);
+    }
+
+    addA(cx, cy, rOut, theta + a2, Math.PI, false, 40);
+    addL(innerFrontX, t);
+    addL(0, t);
+    addL(innerBottom.x, innerBottom.y);
+    cmds.push({ type: "Z" });
+    return cmds;
+  }
+
+  function pathFromCommands(cmds) {
+    let d = "";
+    for (const c of cmds) {
+      if (c.type === "M") d += `M ${fmt(c.x)} ${fmt(c.y)} `;
+      else if (c.type === "L") d += `L ${fmt(c.x)} ${fmt(c.y)} `;
+      else if (c.type === "A") {
+        const ex = c.cx + c.r * Math.cos(c.a1);
+        const ey = c.cy + c.r * Math.sin(c.a1);
+        d += `A ${fmt(c.r)} ${fmt(c.r)} 0 0 ${c.ccw ? 0 : 1} ${fmt(ex)} ${fmt(ey)} `;
+      } else d += "Z";
+    }
+    return d.trim();
+  }
+
+  function sampleFixedTopology(cmds) {
+    const pts = [];
+    for (const c of cmds) {
+      if (c.type === "M") pts.push({ x: c.x, y: c.y });
+      else if (c.type === "L") pts.push({ x: c.x, y: c.y });
+      else if (c.type === "A") {
+        for (let i = 1; i <= c.n; i++) {
+          const a = c.a0 + (c.a1 - c.a0) * i / c.n;
+          pts.push({ x: c.cx + c.r * Math.cos(a), y: c.cy + c.r * Math.sin(a) });
+        }
+      }
+    }
+    return pts;
+  }
+
+  function cleanPolygon(points) {
+    const out = [];
+    for (const p of points) {
+      const last = out[out.length - 1];
+      if (!last || Math.hypot(last.x - p.x, last.y - p.y) > 1e-7) out.push(p);
+    }
+    while (out.length > 2 && Math.hypot(out[0].x - out[out.length - 1].x, out[0].y - out[out.length - 1].y) < 1e-7) out.pop();
+    return out;
+  }
+
+  function polyArea(points) {
+    let area = 0;
+    for (let i = 0; i < points.length; i++) {
+      const a = points[i], b = points[(i + 1) % points.length];
+      area += a.x * b.y - b.x * a.y;
+    }
+    return area / 2;
+  }
+
+  function tipSetback(g, z) {
+    if (g.re <= 1e-9) return 0;
+    const half = g.outWidth / 2;
+    const a = Math.abs(z);
+    const inner = half - g.re;
+    if (a <= inner) return 0;
+    const d = Math.min(g.re, a - inner);
+    return g.re - Math.sqrt(Math.max(0, g.re * g.re - d * d));
+  }
+
+  function outerEdgeSetback(g, z) {
+    if (g.ro <= 1e-9) return 0;
+    const half = g.outWidth / 2;
+    const a = Math.abs(z);
+    const inner = half - g.ro;
+    if (a <= inner) return 0;
+    const d = Math.min(g.ro, a - inner);
+    const s = g.ro - Math.sqrt(Math.max(0, g.ro * g.ro - d * d));
+    return Math.min(s, g.t * 0.495);
+  }
+
+  function thetaForZ(g, z) {
+    return tipSetback(g, z) / (g.r + g.t / 2);
+  }
+
+  function sliceZValues(g) {
+    const half = g.outWidth / 2;
+    const radii = [g.re, g.ro].filter(rad => rad > 1e-9);
+    if (!radii.length) return [-half, half];
+    const k = 10;
+    const pos = new Set([0, half]);
+    for (const rad of radii) {
+      const inner = Math.max(0, half - rad);
+      pos.add(inner);
+      for (let i = 0; i <= k; i++) {
+        const phi = (i / k) * Math.PI / 2;
+        pos.add(Math.min(half, inner + rad * Math.sin(phi)));
+      }
+    }
+    const sortedPos = [...pos].sort((a, b) => a - b);
+    const all = [
+      ...sortedPos.slice().reverse().map(v => -v),
+      ...sortedPos
+    ].sort((a, b) => a - b);
+    return all.filter((z, i) => i === 0 || Math.abs(z - all[i - 1]) > 1e-6);
+  }
+
+  function buildLoftSlice(g, z) {
+    const theta = thetaForZ(g, z);
+    const s = outerEdgeSetback(g, z);
+    const t = g.t;
+    const te = Math.max(0.08, t - 2 * s);
+    const R = Math.max(0, g.R - s);
+    const { W, r, cx, cy, B, sinD, cosD, innerFrontX } = g;
+    const rIn = r + s;
+    const rOut = r + t - s;
+    const rt = Math.min(g.rt, te * 0.495);
+    const outerTopX = -t + s;
+    const outerBottom = { x: outerTopX + B * sinD, y: t + B * cosD };
+    const innerBottom = g.backInnerBottom;
+    const cmds = [];
+    const addM = (x, y) => cmds.push({ type: "M", x, y });
+    const addL = (x, y) => cmds.push({ type: "L", x, y });
+    const addA = (ax, ay, rad, a0, a1, n) => cmds.push({ type: "A", cx: ax, cy: ay, r: rad, a0, a1, n });
+
+    addM(outerBottom.x, outerBottom.y);
+    addL(outerTopX, t);
+    addL(outerTopX, s + R);
+    addA(outerTopX + R, s + R, R, Math.PI, Math.PI * 1.5, 10);
+    addL(innerFrontX + t - s - R, s);
+    addA(innerFrontX + t - s - R, s + R, R, -Math.PI / 2, 0, 10);
+    addL(innerFrontX + t - s, cy);
+
+    const a1 = Math.atan2(rt, rIn + rt);
+    const a2 = Math.atan2(rt, rOut - rt);
+    const L1 = Math.hypot(rIn + rt, rt);
+    const L2 = Math.hypot(rOut - rt, rt);
+
+    addA(cx, cy, rIn, Math.PI, theta + a1, 40);
+
+    const erx = Math.cos(theta), ery = Math.sin(theta);
+    const etx = -Math.sin(theta), ety = Math.cos(theta);
+
+    const c1x = cx + (rIn + rt) * erx + rt * etx;
+    const c1y = cy + (rIn + rt) * ery + rt * ety;
+    const t1x = cx + rIn * (c1x - cx) / L1;
+    const t1y = cy + rIn * (c1y - cy) / L1;
+    const e1x = cx + (rIn + rt) * erx;
+    const e1y = cy + (rIn + rt) * ery;
+    const a10 = rt > 1e-9 ? Math.atan2(t1y - c1y, t1x - c1x) : theta;
+    const a11 = rt > 1e-9 ? Math.atan2(e1y - c1y, e1x - c1x) : theta;
+    addA(c1x, c1y, rt, a10, a11, 8);
+
+    const c2x = cx + (rOut - rt) * erx + rt * etx;
+    const c2y = cy + (rOut - rt) * ery + rt * ety;
+    const t2x = cx + rOut * (c2x - cx) / L2;
+    const t2y = cy + rOut * (c2y - cy) / L2;
+    const e2x = cx + (rOut - rt) * erx;
+    const e2y = cy + (rOut - rt) * ery;
+    addL(e2x, e2y);
+    const a20 = rt > 1e-9 ? Math.atan2(e2y - c2y, e2x - c2x) : theta;
+    const a21 = rt > 1e-9 ? Math.atan2(t2y - c2y, t2x - c2x) : theta;
+    addA(c2x, c2y, rt, a20, a21, 8);
+
+    addA(cx, cy, rOut, theta + a2, Math.PI, 40);
+    addL(innerFrontX, t);
+    addL(0, t);
+    addL(innerBottom.x, innerBottom.y);
+
+    const pts = sampleFixedTopology(cmds);
+    if (polyArea(pts) < 0) pts.reverse();
+    return pts;
+  }
+
+  function buildSlices(g) {
+    const key = JSON.stringify([g.W, g.B, g.F, g.r, g.t, g.R, g.ro, g.rt, g.re, g.outWidth, Number(g.delta.toFixed(9))]);
+    if (sliceCache.key === key) return sliceCache.value;
+    const zs = sliceZValues(g);
+    const slices = zs.map(z => {
+      const pts = buildLoftSlice(g, z);
+      return { z, pts, area: Math.abs(polyArea(pts)) };
+    });
+    let volume = 0;
+    for (let i = 0; i < slices.length - 1; i++) {
+      volume += (slices[i].area + slices[i + 1].area) / 2 * (slices[i + 1].z - slices[i].z);
+    }
+    const value = { slices, volume };
+    sliceCache = { key, value };
+    return value;
+  }
+
+  function triangulate(points) {
+    const n = points.length;
+    const idx = [...Array(n).keys()];
+    const tris = [];
+    const cross = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    const inside = (p, a, b, c) => cross(a, b, p) >= -1e-9 && cross(b, c, p) >= -1e-9 && cross(c, a, p) >= -1e-9;
+    let guard = 0;
+    while (idx.length > 3 && guard++ < n * n) {
+      let clipped = false;
+      for (let i = 0; i < idx.length; i++) {
+        const ia = idx[(i - 1 + idx.length) % idx.length];
+        const ib = idx[i];
+        const ic = idx[(i + 1) % idx.length];
+        const a = points[ia], b = points[ib], c = points[ic];
+        if (cross(a, b, c) <= 1e-10) continue;
+        let contains = false;
+        for (const j of idx) {
+          if (j === ia || j === ib || j === ic) continue;
+          if (inside(points[j], a, b, c)) { contains = true; break; }
+        }
+        if (contains) continue;
+        tris.push([ia, ib, ic]);
+        idx.splice(i, 1);
+        clipped = true;
+        break;
+      }
+      if (!clipped) break;
+    }
+    if (idx.length === 3) tris.push([...idx]);
+    if (tris.length !== n - 2) throw new Error("Could not triangulate the current profile.");
+    return tris;
+  }
+
+  function getMesh() {
+    const key = JSON.stringify(state);
+    if (meshCache.key === key) return meshCache.value;
+    const g = buildGeometry(state);
+    const { slices } = buildSlices(g);
+    const half = g.outWidth / 2;
+    const centerX = (g.minX + g.maxX) / 2;
+    const centerY = g.maxY / 2;
+    const world = (p, z) => [p.x - centerX, centerY - p.y, z];
+    const same3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < 1e-7;
+    const pushTri = (a, b, c) => {
+      if (same3(a, b) || same3(b, c) || same3(c, a)) return;
+      tris.push([a, b, c]);
+    };
+    const polys = slices.map(s => s.pts);
+    const tris = [];
+
+    for (let i = 0; i < slices.length - 1; i++) {
+      const a = polys[i], b = polys[i + 1];
+      const za = slices[i].z, zb = slices[i + 1].z;
+      for (let j = 0; j < a.length; j++) {
+        const k = (j + 1) % a.length;
+        pushTri(world(a[j], za), world(a[k], za), world(b[k], zb));
+        pushTri(world(a[j], za), world(b[k], zb), world(b[j], zb));
+      }
+    }
+    const lastPoly = cleanPolygon(polys[polys.length - 1]);
+    for (const [a, b, c] of triangulate(lastPoly)) {
+      pushTri(world(lastPoly[a], half), world(lastPoly[b], half), world(lastPoly[c], half));
+    }
+    const firstPoly = cleanPolygon(polys[0]);
+    for (const [a, b, c] of triangulate(firstPoly)) {
+      pushTri(world(firstPoly[a], -half), world(firstPoly[c], -half), world(firstPoly[b], -half));
+    }
+
+    let signed = 0;
+    for (const [a, b, c] of tris) {
+      signed += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6;
+    }
+    if (signed < 0) for (const t of tris) t.reverse();
+
+    meshCache = { key, value: tris };
+    return tris;
+  }
+
+  function normal(triangle) {
+    const [a, b, c] = triangle;
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+    const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    let x = uy * vz - uz * vy, y = uz * vx - ux * vz, z = ux * vy - uy * vx;
+    const length = Math.hypot(x, y, z) || 1;
+    return [x / length, y / length, z / length];
+  }
+
+  function dimensionLine(x1, y1, x2, y2) {
+    return `<line x1="${fmt(x1)}" y1="${fmt(y1)}" x2="${fmt(x2)}" y2="${fmt(y2)}" marker-start="url(#dimensionArrow)" marker-end="url(#dimensionArrow)"/>`;
+  }
+  function extensionLine(x1, y1, x2, y2) {
+    return `<line x1="${fmt(x1)}" y1="${fmt(y1)}" x2="${fmt(x2)}" y2="${fmt(y2)}" stroke-width=".4"/>`;
+  }
+  function label(x, y, text, extra = "") {
+    return `<text x="${fmt(x)}" y="${fmt(y)}" stroke="none" text-anchor="middle" ${extra}>${text}</text>`;
+  }
+
+  function renderDimensions(g) {
+    if (!showDimensions) {
+      dimensions.innerHTML = "";
+      return;
+    }
+    const { W, B, F, r, t, cx, cy, maxX, delta, cosD, sinD } = g;
+    const roofY = -17;
+    const frontX = maxX + 18;
+    let html = "";
+    html += extensionLine(0, -22, 0, -3);
+    html += extensionLine(W, -22, W, -3);
+    html += dimensionLine(0, roofY, W, roofY);
+    html += label(W / 2, roofY - 3, `${fmt(W)} · ROOF CLEAR`);
+
+    // Back leg dimension runs parallel to the leg, which may be tilted.
+    const nx = -cosD, ny = sinD;
+    const off = 15;
+    const ax = -t + off * nx, ay = t + off * ny;
+    const bx = g.backOuterBottom.x + off * nx, by = g.backOuterBottom.y + off * ny;
+    html += extensionLine(-t, t, ax + 3 * nx, ay + 3 * ny);
+    html += extensionLine(g.backOuterBottom.x, g.backOuterBottom.y, bx + 3 * nx, by + 3 * ny);
+    html += dimensionLine(ax, ay, bx, by);
+    const lx = (ax + bx) / 2 + 4 * nx, ly = (ay + by) / 2 + 4 * ny;
+    const rot = -90 - delta / DEG;
+    html += label(lx, ly, `${fmt(B)} · BACK`, `transform="rotate(${fmt(rot, 2)} ${fmt(lx)} ${fmt(ly)})"`);
+
+    html += extensionLine(g.innerFrontX, t, frontX + 3, t);
+    html += extensionLine(maxX, cy, frontX + 3, cy);
+    html += dimensionLine(frontX, t, frontX, cy);
+    html += label(frontX + 4, t + F / 2, `${fmt(F)} · FRONT`, `transform="rotate(-90 ${fmt(frontX + 4)} ${fmt(t + F / 2)})"`);
+
+    html += `<circle cx="${fmt(cx)}" cy="${fmt(cy)}" r=".9" fill="#68766f" stroke="none"/>`;
+    html += dimensionLine(cx, cy, cx, cy + r);
+    html += label(cx + 8, cy + r * .56, `R ${fmt(r)}`, 'text-anchor="start"');
+    dimensions.innerHTML = html;
+  }
+
+  function render() {
+    clampState();
+    const g = buildGeometry(state);
+    currentGeometry = g;
+
+    for (const def of definitions) {
+      const number = document.getElementById(`number-${def.key}`);
+      const range = document.getElementById(`range-${def.key}`);
+      const lim = limitFor(def.key, state);
+      const lo = Math.max(def.min, lim.min);
+      const hi = Math.min(def.max, lim.max);
+      number.min = lo;
+      number.max = hi;
+      range.min = lo;
+      range.max = hi;
+      number.value = fmt(state[def.key]);
+      range.value = state[def.key];
+      const fill = (state[def.key] - lo) / Math.max(.0001, hi - lo) * 100;
+      range.style.setProperty("--fill", `${Math.max(0, Math.min(100, fill))}%`);
+    }
+
+    hookProfile.setAttribute("d", pathFromCommands(buildCommands(g, 0)));
+    renderDimensions(g);
+    const bananaGap = showDimensions ? 34 : 20;
+    bananaGroup.innerHTML = showBanana ? buildBanana2D(g.maxX + bananaGap) : "";
+    const padding = showDimensions ? { left: 29, right: 42, top: 31, bottom: 18 } : { left: 15, right: 15, top: 15, bottom: 15 };
+    const sceneMaxX = showBanana ? g.maxX + bananaGap + BANANA_WIDTH : g.maxX;
+    const sceneMaxY = showBanana ? Math.max(g.maxY, BANANA_HEIGHT + 10) : g.maxY;
+    profileSvg.setAttribute("viewBox", `${g.minX - padding.left} ${-padding.top} ${sceneMaxX - g.minX + padding.left + padding.right} ${sceneMaxY + padding.top + padding.bottom}`);
+
+    const { volume } = buildSlices(g);
+    document.getElementById("overallWidth").innerHTML = `${fmt(g.maxX - g.minX, 1)} <small>mm</small>`;
+    document.getElementById("overallHeight").innerHTML = `${fmt(g.maxY, 1)} <small>mm</small>`;
+    document.getElementById("mouthGap").innerHTML = `${fmt(g.mouthGap, 2)} <small>mm</small>`;
+    document.getElementById("materialVolume").innerHTML = `${fmt(volume / 1000, 1)} <small>cm³</small>`;
+
+    // Zero-clearance panel: the tip must deflect by the mouth underfit.
+    // Fixed-root cantilever, rectangular section: surface strain = 1.5 * t * deflection / L^2.
+    const interference = Math.max(0, g.W - g.mouthGap);
+    const strain = 1.5 * g.t * interference / (g.B * g.B);
+    const strainValue = document.getElementById("strainValue");
+    const strainVerdict = document.getElementById("strainVerdict");
+    const strainMarker = document.getElementById("strainMarker");
+    strainMarker.style.left = `${Math.min(100, strain / STRAIN_SCALE * 100)}%`;
+    let strainClass, verdict;
+    if (interference < 1e-9) {
+      strainClass = "none"; verdict = "no preload";
+    } else if (strain <= PLA_STRAIN) {
+      strainClass = "ok"; verdict = "elastic";
+    } else if (strain <= PETG_STRAIN) {
+      strainClass = "warn"; verdict = "PETG only";
+    } else {
+      strainClass = "bad"; verdict = "over limit";
+    }
+    strainValue.textContent = `${(strain * 100).toFixed(2)}%`;
+    strainValue.className = strainClass;
+    strainVerdict.textContent = verdict;
+    strainVerdict.className = `strain-verdict ${strainClass}`;
+
+    if (mode === "3d") requestAnimationFrame(drawMesh);
+  }
+
+  function setMode(nextMode) {
+    mode = nextMode;
+    stage.dataset.view = mode;
+    document.getElementById("sideTab").setAttribute("aria-pressed", String(mode === "side"));
+    document.getElementById("meshTab").setAttribute("aria-pressed", String(mode === "3d"));
+    document.getElementById("stageLabel").textContent = mode === "side" ? "SIDE ELEVATION" : "EXTRUDED MODEL";
+    if (mode === "3d") requestAnimationFrame(resizeCanvas);
+  }
+
+  function showToast(message) {
+    const toast = document.getElementById("toast");
+    toast.textContent = message;
+    toast.classList.add("visible");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove("visible"), 2200);
+  }
+
+  function download(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function exportSvg() {
+    const g = currentGeometry;
+    const width = g.maxX - g.minX;
+    const d = pathFromCommands(buildCommands(g, 0));
+    const source = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- Parametric hook side profile. Units: millimeters. Roof clear width: ${fmt(g.W)} mm. Back leg angle: ${fmt(g.backLegAngle, 1)} degrees. -->\n<svg xmlns="http://www.w3.org/2000/svg" width="${fmt(width)}mm" height="${fmt(g.maxY)}mm" viewBox="${fmt(g.minX)} 0 ${fmt(width)} ${fmt(g.maxY)}">\n  <path d="${d}" fill="#e66a42" stroke="none"/>\n</svg>\n`;
+    download(new Blob([source], { type: "image/svg+xml" }), "parametric-hook.svg");
+    showToast("Side profile exported as SVG");
+  }
+
+  const camera = { yaw: -0.48, pitch: -0.32, zoom: 1 };
+  let fallbackCtx = null;
+  let fallbackScale = 1;
+  let fallbackOffset = [0, 0];
+
+  function rotatePoint(point) {
+    const [x, y, z] = point;
+    const cp = Math.cos(camera.pitch), sp = Math.sin(camera.pitch);
+    const cy = Math.cos(camera.yaw), sy = Math.sin(camera.yaw);
+    const y1 = y * cp - z * sp;
+    const z1 = y * sp + z * cp;
+    return [x * cy + z1 * sy, y1, -x * sy + z1 * cy];
+  }
+
+  let gl = null;
+  let glProgram = null;
+  let glPosBuffer = null;
+  let glNormBuffer = null;
+  let glColBuffer = null;
+  let glCount = 0;
+  let glBounds = null;
+  let glUniforms = {};
+  let glSceneKey = "";
+
+  function initGL() {
+    try {
+      gl = canvas.getContext("webgl", { alpha: true, antialias: true });
+    } catch (error) {
+      gl = null;
+    }
+    if (!gl) {
+      fallbackCtx = canvas.getContext("2d");
+      return;
+    }
+
+    const vertexSource = `
+      attribute vec3 aPosition;
+      attribute vec3 aNormal;
+      attribute vec3 aColor;
+      uniform mat3 uRotation;
+      uniform vec2 uScale;
+      uniform vec2 uOffset;
+      uniform float uDepth;
+      varying vec3 vNormal;
+      varying vec3 vColor;
+      void main() {
+        vec3 p = uRotation * aPosition;
+        gl_Position = vec4(p.xy * uScale + uOffset, -p.z * uDepth, 1.0);
+        vNormal = aNormal;
+        vColor = aColor;
+      }`;
+
+    const fragmentSource = `
+      precision mediump float;
+      varying vec3 vNormal;
+      varying vec3 vColor;
+      void main() {
+        vec3 n = normalize(vNormal);
+        float key = max(dot(n, normalize(vec3(-0.42, 0.74, 0.52))), 0.0);
+        float fill = max(dot(n, normalize(vec3(0.55, -0.18, 0.82))), 0.0);
+        float brightness = 0.50 + key * 0.42 + fill * 0.10;
+        gl_FragColor = vec4(vColor * brightness, 1.0);
+      }`;
+
+    function compile(type, source) {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        throw new Error(gl.getShaderInfoLog(shader) || "Shader compile failed");
+      }
+      return shader;
+    }
+
+    try {
+      const program = gl.createProgram();
+      gl.attachShader(program, compile(gl.VERTEX_SHADER, vertexSource));
+      gl.attachShader(program, compile(gl.FRAGMENT_SHADER, fragmentSource));
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        throw new Error(gl.getProgramInfoLog(program) || "Program link failed");
+      }
+      glProgram = program;
+      gl.useProgram(program);
+
+      glPosBuffer = gl.createBuffer();
+      glNormBuffer = gl.createBuffer();
+      glColBuffer = gl.createBuffer();
+      glUniforms = {
+        rotation: gl.getUniformLocation(program, "uRotation"),
+        scale: gl.getUniformLocation(program, "uScale"),
+        offset: gl.getUniformLocation(program, "uOffset"),
+        depth: gl.getUniformLocation(program, "uDepth")
+      };
+
+      const posLoc = gl.getAttribLocation(program, "aPosition");
+      const normLoc = gl.getAttribLocation(program, "aNormal");
+      const colLoc = gl.getAttribLocation(program, "aColor");
+      gl.enableVertexAttribArray(posLoc);
+      gl.enableVertexAttribArray(normLoc);
+      gl.enableVertexAttribArray(colLoc);
+      gl.bindBuffer(gl.ARRAY_BUFFER, glPosBuffer);
+      gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, glNormBuffer);
+      gl.vertexAttribPointer(normLoc, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, glColBuffer);
+      gl.vertexAttribPointer(colLoc, 3, gl.FLOAT, false, 0, 0);
+
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LEQUAL);
+      gl.enable(gl.CULL_FACE);
+      gl.cullFace(gl.BACK);
+      gl.frontFace(gl.CCW);
+      gl.clearColor(0, 0, 0, 0);
+    } catch (error) {
+      gl = null;
+      fallbackCtx = canvas.getContext("2d");
+    }
+  }
+
+  function buildSceneTriangles(mesh) {
+    const hookColor = [230 / 255, 106 / 255, 66 / 255];
+    const items = mesh.map(pts => ({ pts, color: hookColor }));
+    if (showBanana) {
+      const g = currentGeometry || buildGeometry(state);
+      const centerX = (g.minX + g.maxX) / 2;
+      const centerY = g.maxY / 2;
+      for (const b of buildBananaMesh(g, centerX, centerY)) items.push(b);
+    }
+    return items;
+  }
+
+  function uploadGL(mesh, sceneKey) {
+    const items = buildSceneTriangles(mesh);
+    const positions = new Float32Array(items.length * 9);
+    const normals = new Float32Array(items.length * 9);
+    const colors = new Float32Array(items.length * 9);
+    const min = [Infinity, Infinity, Infinity];
+    const max = [-Infinity, -Infinity, -Infinity];
+    let offset = 0;
+    for (const item of items) {
+      const triangle = item.pts;
+      const col = item.color;
+      const n = normal(triangle);
+      for (let v = 0; v < 3; v++) {
+        const p = triangle[v];
+        positions[offset] = p[0];
+        positions[offset + 1] = p[1];
+        positions[offset + 2] = p[2];
+        normals[offset] = n[0];
+        normals[offset + 1] = n[1];
+        normals[offset + 2] = n[2];
+        colors[offset] = col[0];
+        colors[offset + 1] = col[1];
+        colors[offset + 2] = col[2];
+        for (let k = 0; k < 3; k++) {
+          if (p[k] < min[k]) min[k] = p[k];
+          if (p[k] > max[k]) max[k] = p[k];
+        }
+        offset += 3;
+      }
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, glPosBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, glNormBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, normals, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, glColBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STATIC_DRAW);
+    glCount = items.length * 3;
+    glBounds = { min, max };
+    glSceneKey = sceneKey;
+  }
+
+  function drawGL(mesh) {
+    const ratio = canvas._ratio || 1;
+    const width = canvas.width / ratio;
+    const height = canvas.height / ratio;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    if (!mesh.length) return;
+    const sceneKey = `${meshCache.key}|${showBanana ? 1 : 0}|${showDimensions ? 1 : 0}`;
+    if (sceneKey !== glSceneKey) uploadGL(mesh, sceneKey);
+
+    const cy = Math.cos(camera.yaw), sy = Math.sin(camera.yaw);
+    const cp = Math.cos(camera.pitch), sp = Math.sin(camera.pitch);
+    const rotation = new Float32Array([
+      cy, 0, -sy,
+      sy * sp, cp, cy * sp,
+      sy * cp, -sp, cy * cp
+    ]);
+    gl.uniformMatrix3fv(glUniforms.rotation, false, rotation);
+
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, maxAbsZ = 0;
+    const corners = [];
+    for (const x of [glBounds.min[0], glBounds.max[0]]) {
+      for (const y of [glBounds.min[1], glBounds.max[1]]) {
+        for (const z of [glBounds.min[2], glBounds.max[2]]) corners.push(rotatePoint([x, y, z]));
+      }
+    }
+    for (const c of corners) {
+      minX = Math.min(minX, c[0]); maxX = Math.max(maxX, c[0]);
+      minY = Math.min(minY, c[1]); maxY = Math.max(maxY, c[1]);
+      maxAbsZ = Math.max(maxAbsZ, Math.abs(c[2]));
+    }
+    const scale = Math.min((width - 100) / Math.max(1, maxX - minX), (height - 82) / Math.max(1, maxY - minY)) * camera.zoom;
+    const sx = 2 * scale / width;
+    const sy2 = 2 * scale / height;
+    gl.uniform2f(glUniforms.scale, sx, sy2);
+    gl.uniform2f(glUniforms.offset, -(minX + maxX) / 2 * sx, -(minY + maxY) / 2 * sy2);
+    gl.uniform1f(glUniforms.depth, 1 / (2 * maxAbsZ + 1));
+
+    gl.drawArrays(gl.TRIANGLES, 0, glCount);
+  }
+
+  function draw2D(mesh) {
+    const ratio = canvas._ratio || 1;
+    const width = canvas.width / ratio, height = canvas.height / ratio;
+    fallbackCtx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    fallbackCtx.clearRect(0, 0, width, height);
+
+    const items = buildSceneTriangles(mesh);
+    const rotated = items.map(item => {
+      const points = item.pts.map(rotatePoint);
+      return { points, normal: normal(item.pts), color: item.color, depth: (points[0][2] + points[1][2] + points[2][2]) / 3 };
+    });
+    const all = rotated.flatMap(t => t.points);
+    const minX = Math.min(...all.map(p => p[0])), maxX = Math.max(...all.map(p => p[0]));
+    const minY = Math.min(...all.map(p => p[1])), maxY = Math.max(...all.map(p => p[1]));
+    fallbackScale = Math.min((width - 100) / Math.max(1, maxX - minX), (height - 82) / Math.max(1, maxY - minY)) * camera.zoom;
+    fallbackOffset = [width / 2 - (minX + maxX) / 2 * fallbackScale, height / 2 + (minY + maxY) / 2 * fallbackScale];
+    rotated.sort((a, b) => a.depth - b.depth);
+
+    fallbackCtx.lineWidth = .8;
+    for (const triangle of rotated) {
+      const n = triangle.normal;
+      const col = triangle.color;
+      const key = Math.max(0, n[0] * -0.42 + n[1] * 0.74 + n[2] * 0.52);
+      const fill = Math.max(0, n[0] * 0.55 + n[1] * -0.18 + n[2] * 0.82);
+      const brightness = .50 + key * .42 + fill * .10;
+      const red = Math.round(col[0] * 255 * brightness), green = Math.round(col[1] * 255 * brightness), blue = Math.round(col[2] * 255 * brightness);
+      fallbackCtx.beginPath();
+      triangle.points.forEach((p, index) => {
+        const x = fallbackOffset[0] + p[0] * fallbackScale;
+        const y = fallbackOffset[1] - p[1] * fallbackScale;
+        if (index === 0) fallbackCtx.moveTo(x, y); else fallbackCtx.lineTo(x, y);
+      });
+      fallbackCtx.closePath();
+      fallbackCtx.fillStyle = `rgb(${red} ${green} ${blue})`;
+      fallbackCtx.strokeStyle = fallbackCtx.fillStyle;
+      fallbackCtx.fill();
+      fallbackCtx.stroke();
+    }
+  }
+
+  function resizeCanvas() {
+    if (mode !== "3d") return;
+    const rect = stage.getBoundingClientRect();
+    const ratio = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width = Math.max(1, Math.round(rect.width * ratio));
+    canvas.height = Math.max(1, Math.round(rect.height * ratio));
+    canvas._ratio = ratio;
+    drawMesh();
+  }
+
+  function drawMesh() {
+    if (mode !== "3d" || !canvas.width) return;
+    let mesh;
+    try { mesh = getMesh(); }
+    catch (error) { showToast(error.message); return; }
+    if (gl) drawGL(mesh);
+    else if (fallbackCtx) draw2D(mesh);
+  }
+
+  function exportStl() {
+    try {
+      const mesh = getMesh();
+      const buffer = new ArrayBuffer(84 + mesh.length * 50);
+      const view = new DataView(buffer);
+      const header = "Hangform parametric hook - units millimeters";
+      for (let i = 0; i < Math.min(80, header.length); i++) view.setUint8(i, header.charCodeAt(i));
+      view.setUint32(80, mesh.length, true);
+      let offset = 84;
+      for (const triangle of mesh) {
+        const n = normal(triangle);
+        for (const value of [...n, ...triangle[0], ...triangle[1], ...triangle[2]]) {
+          view.setFloat32(offset, value, true);
+          offset += 4;
+        }
+        view.setUint16(offset, 0, true);
+        offset += 2;
+      }
+      download(new Blob([buffer], { type: "model/stl" }), "parametric-hook.stl");
+      showToast(`Watertight STL exported · ${mesh.length.toLocaleString()} facets`);
+    } catch (error) {
+      showToast(error.message || "Could not export this geometry");
+    }
+  }
+
+  let dragging = false;
+  let previousPointer = [0, 0];
+  canvas.addEventListener("pointerdown", event => {
+    dragging = true;
+    previousPointer = [event.clientX, event.clientY];
+    canvas.setPointerCapture(event.pointerId);
+  });
+  canvas.addEventListener("pointermove", event => {
+    if (!dragging) return;
+    camera.yaw += (event.clientX - previousPointer[0]) * .009;
+    camera.pitch = Math.max(-1.45, Math.min(1.45, camera.pitch + (event.clientY - previousPointer[1]) * .009));
+    previousPointer = [event.clientX, event.clientY];
+    drawMesh();
+  });
+  canvas.addEventListener("pointerup", () => { dragging = false; });
+  canvas.addEventListener("pointercancel", () => { dragging = false; });
+  canvas.addEventListener("wheel", event => {
+    event.preventDefault();
+    camera.zoom = Math.max(.45, Math.min(3, camera.zoom * Math.exp(-event.deltaY * .001)));
+    drawMesh();
+  }, { passive: false });
+  canvas.addEventListener("dblclick", () => {
+    camera.yaw = -.48; camera.pitch = -.32; camera.zoom = 1;
+    drawMesh();
+  });
+
+  document.getElementById("sideTab").addEventListener("click", () => setMode("side"));
+  document.getElementById("meshTab").addEventListener("click", () => setMode("3d"));
+  document.getElementById("bananaToggle").addEventListener("change", event => { showBanana = event.target.checked; render(); });
+  document.getElementById("dimensionToggle").addEventListener("change", event => { showDimensions = event.target.checked; render(); });
+  document.getElementById("resetButton").addEventListener("click", () => {
+    Object.assign(state, defaults);
+    camera.yaw = -.48; camera.pitch = -.32; camera.zoom = 1;
+    render();
+    showToast("Defaults restored");
+  });
+  document.getElementById("svgButton").addEventListener("click", exportSvg);
+  document.getElementById("stlButton").addEventListener("click", exportStl);
+  new ResizeObserver(resizeCanvas).observe(stage);
+
+  initGL();
+  buildControls();
+  render();
+
+  window.__hangform = {
+    state: () => ({ ...state }),
+    geometry: () => buildGeometry(state),
+    slices: () => buildSlices(buildGeometry(state)),
+    mesh: () => getMesh(),
+    strain: () => {
+      const g = buildGeometry(state);
+      return 1.5 * g.t * Math.max(0, g.W - g.mouthGap) / (g.B * g.B);
+    },
+    camera,
+    draw: () => drawMesh(),
+    renderer: () => gl ? "webgl" : "canvas2d",
+    set: (key, value) => {
+      const input = document.getElementById(`number-${key}`);
+      if (!input) return;
+      input.value = value;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  };
+})();
+  </script>
+</body>
+</html>
