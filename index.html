@@ -574,6 +574,33 @@
     };
   }
 
+  // Fillet a convex profile corner. d1/d2 are unit vectors pointing away from
+  // the corner along each edge; maxL caps the tangent length so the arc fits.
+  function cornerFillet(P, d1, d2, radius, maxL) {
+    if (!(radius > 1e-9)) return null;
+    const bx = d1.x + d2.x, by = d1.y + d2.y;
+    const bm = Math.hypot(bx, by);
+    if (bm < 1e-9) return null;
+    const dot = Math.max(-1, Math.min(1, d1.x * d2.x + d1.y * d2.y));
+    const alpha = Math.acos(dot);
+    if (alpha < 1e-6 || Math.PI - alpha < 1e-6) return null;
+    const half = alpha / 2;
+    let L = radius / Math.tan(half);
+    if (Number.isFinite(maxL)) L = Math.min(L, maxL * 0.999);
+    if (L <= 1e-9) return null;
+    const r = L * Math.tan(half);
+    const T1 = { x: P.x + d1.x * L, y: P.y + d1.y * L };
+    const T2 = { x: P.x + d2.x * L, y: P.y + d2.y * L };
+    const h = r / Math.sin(half);
+    const C = { x: P.x + (bx / bm) * h, y: P.y + (by / bm) * h };
+    const aStart = Math.atan2(T2.y - C.y, T2.x - C.x);
+    const aEnd = Math.atan2(T1.y - C.y, T1.x - C.x);
+    let delta = aEnd - aStart;
+    while (delta > Math.PI) delta -= 2 * Math.PI;
+    while (delta < -Math.PI) delta += 2 * Math.PI;
+    return { T1, T2, C, r, aStart, aEnd: aStart + delta, delta };
+  }
+
   function buildCommands(g, theta, outSetback = 0) {
     const s = Math.min(outSetback, g.t * 0.495);
     const t = g.t;
@@ -592,7 +619,16 @@
     const addL = (x, y) => cmds.push({ type: "L", x, y });
     const addA = (ax, ay, rad, a0, a1, ccw, n) => cmds.push({ type: "A", cx: ax, cy: ay, r: rad, a0, a1, ccw, n });
 
-    addM(outerBottom.x, outerBottom.y);
+    const bottomFillet = cornerFillet(
+      outerBottom,
+      { x: -sinD, y: -cosD },
+      { x: 1, y: 0 },
+      R,
+      innerBottom.x - outerBottom.x
+    );
+
+    if (bottomFillet) addM(bottomFillet.T1.x, bottomFillet.T1.y);
+    else addM(outerBottom.x, outerBottom.y);
     addL(outerTopX, t);
     if (s + R < t - 1e-9) addL(outerTopX, s + R);
     if (R > 1e-9) addA(outerTopX + R, s + R, R, Math.PI, Math.PI * 1.5, false, 10);
@@ -635,6 +671,10 @@
     addL(innerFrontX, t);
     addL(0, t);
     addL(innerBottom.x, innerBottom.y);
+    if (bottomFillet) {
+      addL(bottomFillet.T2.x, bottomFillet.T2.y);
+      addA(bottomFillet.C.x, bottomFillet.C.y, bottomFillet.r, bottomFillet.aStart, bottomFillet.aEnd, bottomFillet.delta < 0, 12);
+    }
     cmds.push({ type: "Z" });
     return cmds;
   }
@@ -752,7 +792,16 @@
     const addL = (x, y) => cmds.push({ type: "L", x, y });
     const addA = (ax, ay, rad, a0, a1, n) => cmds.push({ type: "A", cx: ax, cy: ay, r: rad, a0, a1, n });
 
-    addM(outerBottom.x, outerBottom.y);
+    const bottomFillet = cornerFillet(
+      outerBottom,
+      { x: -sinD, y: -cosD },
+      { x: 1, y: 0 },
+      R,
+      innerBottom.x - outerBottom.x
+    );
+
+    if (bottomFillet) addM(bottomFillet.T1.x, bottomFillet.T1.y);
+    else addM(outerBottom.x, outerBottom.y);
     addL(outerTopX, t);
     addL(outerTopX, s + R);
     addA(outerTopX + R, s + R, R, Math.PI, Math.PI * 1.5, 10);
@@ -795,6 +844,10 @@
     addL(innerFrontX, t);
     addL(0, t);
     addL(innerBottom.x, innerBottom.y);
+    if (bottomFillet) {
+      addL(bottomFillet.T2.x, bottomFillet.T2.y);
+      addA(bottomFillet.C.x, bottomFillet.C.y, bottomFillet.r, bottomFillet.aStart, bottomFillet.aEnd, 12);
+    }
 
     const pts = sampleFixedTopology(cmds);
     if (polyArea(pts) < 0) pts.reverse();
