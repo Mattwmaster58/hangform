@@ -74,6 +74,12 @@
     }
     .number-wrap input::-webkit-inner-spin-button, .number-wrap input::-webkit-outer-spin-button { appearance: none; margin: 0; }
     .number-wrap span { position: absolute; right: 8px; top: 8px; color: #929a96; font-size: 10px; pointer-events: none; }
+    .select-wrap { flex: 0 0 110px; }
+    .select-wrap select {
+      width: 100%; height: 31px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 7px;
+      background: var(--soft); color: var(--ink); font-size: 12px; font-weight: 680; cursor: pointer;
+    }
+    .select-wrap select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
     .range {
       --fill: 50%;
       display: block; width: 100%; height: 16px; margin: 5px 0 0; padding: 0;
@@ -313,7 +319,9 @@
     { key: "cornerRadius", label: "Upper outer radius", group: "Edges & tip", min: 0, max: 30, step: 1, value: 0 },
     { key: "edgeRadius", label: "Outer edge radius", group: "Edges & tip", min: 0, max: 6, step: 0.5, value: 1.5 },
     { key: "tipRadius", label: "Tip radius", group: "Edges & tip", min: 0, max: 6, step: 0.5, value: 2.5 },
-    { key: "tipEdgeRadius", label: "Tip edge radius", group: "Edges & tip", min: 0, max: 12, step: 0.5, value: 3 }
+    { key: "tipEdgeRadius", label: "Tip edge radius", group: "Edges & tip", min: 0, max: 12, step: 0.5, value: 3 },
+    { key: "roofProfile", label: "Roof profile", group: "Roof contour", type: "select", options: [{ value: "flat", label: "Flat" }, { value: "arched", label: "Arched" }], value: "flat" },
+    { key: "archRise", label: "Arch rise", group: "Roof contour", min: 0, max: 30, step: 0.1, value: 6.2 }
   ];
   const byKey = Object.fromEntries(definitions.map(d => [d.key, d]));
   const defaults = Object.fromEntries(definitions.map(d => [d.key, d.value]));
@@ -485,6 +493,10 @@
 
   function clampState() {
     for (const def of definitions) {
+      if (def.type === "select") {
+        if (!def.options.some(option => option.value === state[def.key])) state[def.key] = defaults[def.key];
+        continue;
+      }
       const lim = limitFor(def.key, state);
       const lo = Math.max(def.min, lim.min);
       const hi = Math.min(def.max, lim.max);
@@ -500,6 +512,21 @@
       if (def.group !== lastGroup) {
         html += `<div class="group-label">${def.group}</div>`;
         lastGroup = def.group;
+      }
+      if (def.type === "select") {
+        const options = def.options
+          .map(option => `<option value="${option.value}"${option.value === def.value ? " selected" : ""}>${option.label}</option>`)
+          .join("");
+        html += `
+        <div class="parameter">
+          <div class="parameter-top">
+            <label for="select-${def.key}">${def.label}</label>
+            <div class="select-wrap">
+              <select id="select-${def.key}" data-key="${def.key}" aria-label="${def.label}">${options}</select>
+            </div>
+          </div>
+        </div>`;
+        continue;
       }
       const unit = def.unit || "mm";
       const spoken = unit === "°" ? "degrees" : "millimeters";
@@ -517,6 +544,12 @@
     }
     controlsRoot.innerHTML = html;
 
+    controlsRoot.querySelectorAll("select").forEach(select => {
+      select.addEventListener("change", () => {
+        state[select.dataset.key] = select.value;
+        render();
+      });
+    });
     controlsRoot.querySelectorAll(".range").forEach(input => {
       input.addEventListener("input", () => {
         state[input.dataset.key] = Number(input.value);
@@ -564,13 +597,17 @@
     const backOuterBottom = { x: -t + B * sinD, y: t + B * cosD };
     const maxY = Math.max(hookBottomY, backInnerBottom.y);
     const mouthGap = W - B * sinD;
+    const arched = s.roofProfile === "arched";
+    const rise = Math.max(0, s.archRise || 0);
+    const roofTopY = arched ? -rise : 0;
 
     return {
       W, B, F, r, t, R, ro, rt, re, cx, cy, innerFrontX,
       minX, maxX, maxY, mouthGap,
       backLegAngle: angle, delta, sinD, cosD,
       backInnerBottom, backOuterBottom,
-      outWidth: s.outWidth
+      outWidth: s.outWidth,
+      arched, rise, roofTopY
     };
   }
 
@@ -601,6 +638,19 @@
     return { T1, T2, C, r, aStart, aEnd: aStart + delta, delta };
   }
 
+  // Points along the upper half of an ellipse (the roof arch), skipping the
+  // first point because the caller is already positioned there.
+  function archPoints(cx, y0, a, sagitta, fromPhi, toPhi, steps) {
+    const pts = [];
+    for (let i = 1; i <= steps; i++) {
+      const phi = fromPhi + (toPhi - fromPhi) * i / steps;
+      pts.push({ x: cx + a * Math.cos(phi), y: y0 - sagitta * Math.sin(phi) });
+    }
+    return pts;
+  }
+
+  const ARCH_STEPS = 32;
+
   function buildCommands(g, theta, outSetback = 0) {
     const s = Math.min(outSetback, g.t * 0.495);
     const t = g.t;
@@ -630,10 +680,16 @@
     if (bottomFillet) addM(bottomFillet.T1.x, bottomFillet.T1.y);
     else addM(outerBottom.x, outerBottom.y);
     addL(outerTopX, t);
-    if (s + R < t - 1e-9) addL(outerTopX, s + R);
-    if (R > 1e-9) addA(outerTopX + R, s + R, R, Math.PI, Math.PI * 1.5, false, 10);
-    addL(innerFrontX + t - s - R, s);
-    if (R > 1e-9) addA(innerFrontX + t - s - R, s + R, R, -Math.PI / 2, 0, false, 10);
+    if (g.arched) {
+      // Arched roof: the top face is the outward arch spanning both leg tops.
+      addL(outerTopX, s);
+      for (const p of archPoints(W / 2, s, W / 2 + t - s, g.rise, Math.PI, 0, ARCH_STEPS)) addL(p.x, p.y);
+    } else {
+      if (s + R < t - 1e-9) addL(outerTopX, s + R);
+      if (R > 1e-9) addA(outerTopX + R, s + R, R, Math.PI, Math.PI * 1.5, false, 10);
+      addL(innerFrontX + t - s - R, s);
+      if (R > 1e-9) addA(innerFrontX + t - s - R, s + R, R, -Math.PI / 2, 0, false, 10);
+    }
     addL(innerFrontX + t - s, cy);
 
     const a1 = Math.atan2(rt, rIn + rt);
@@ -669,7 +725,12 @@
 
     addA(cx, cy, rOut, theta + a2, Math.PI, false, 40);
     addL(innerFrontX, t);
-    addL(0, t);
+    if (g.arched) {
+      // Underside follows the same ellipse so it nests on the domed object.
+      for (const p of archPoints(W / 2, t, W / 2, g.rise, 0, Math.PI, ARCH_STEPS)) addL(p.x, p.y);
+    } else {
+      addL(0, t);
+    }
     addL(innerBottom.x, innerBottom.y);
     if (bottomFillet) {
       addL(bottomFillet.T2.x, bottomFillet.T2.y);
@@ -803,10 +864,15 @@
     if (bottomFillet) addM(bottomFillet.T1.x, bottomFillet.T1.y);
     else addM(outerBottom.x, outerBottom.y);
     addL(outerTopX, t);
-    addL(outerTopX, s + R);
-    addA(outerTopX + R, s + R, R, Math.PI, Math.PI * 1.5, 10);
-    addL(innerFrontX + t - s - R, s);
-    addA(innerFrontX + t - s - R, s + R, R, -Math.PI / 2, 0, 10);
+    if (g.arched) {
+      addL(outerTopX, s);
+      for (const p of archPoints(W / 2, s, W / 2 + t - s, g.rise, Math.PI, 0, ARCH_STEPS)) addL(p.x, p.y);
+    } else {
+      addL(outerTopX, s + R);
+      addA(outerTopX + R, s + R, R, Math.PI, Math.PI * 1.5, 10);
+      addL(innerFrontX + t - s - R, s);
+      addA(innerFrontX + t - s - R, s + R, R, -Math.PI / 2, 0, 10);
+    }
     addL(innerFrontX + t - s, cy);
 
     const a1 = Math.atan2(rt, rIn + rt);
@@ -842,7 +908,11 @@
 
     addA(cx, cy, rOut, theta + a2, Math.PI, 40);
     addL(innerFrontX, t);
-    addL(0, t);
+    if (g.arched) {
+      for (const p of archPoints(W / 2, t, W / 2, g.rise, 0, Math.PI, ARCH_STEPS)) addL(p.x, p.y);
+    } else {
+      addL(0, t);
+    }
     addL(innerBottom.x, innerBottom.y);
     if (bottomFillet) {
       addL(bottomFillet.T2.x, bottomFillet.T2.y);
@@ -855,7 +925,7 @@
   }
 
   function buildSlices(g) {
-    const key = JSON.stringify([g.W, g.B, g.F, g.r, g.t, g.R, g.ro, g.rt, g.re, g.outWidth, Number(g.delta.toFixed(9))]);
+    const key = JSON.stringify([g.W, g.B, g.F, g.r, g.t, g.R, g.ro, g.rt, g.re, g.outWidth, g.arched, g.rise, Number(g.delta.toFixed(9))]);
     if (sliceCache.key === key) return sliceCache.value;
     const zs = sliceZValues(g);
     const slices = zs.map(z => {
@@ -974,11 +1044,13 @@
       return;
     }
     const { W, B, F, r, t, cx, cy, maxX, delta, cosD, sinD } = g;
-    const roofY = -17;
+    const roofY = Math.min(-17, g.roofTopY - 12);
+    const roofExtTop = roofY - 5;
+    const roofExtBottom = g.roofTopY - 2;
     const frontX = maxX + 18;
     let html = "";
-    html += extensionLine(0, -22, 0, -3);
-    html += extensionLine(W, -22, W, -3);
+    html += extensionLine(0, roofExtTop, 0, roofExtBottom);
+    html += extensionLine(W, roofExtTop, W, roofExtBottom);
     html += dimensionLine(0, roofY, W, roofY);
     html += label(W / 2, roofY - 3, `${fmt(W)} · ROOF CLEAR`);
 
@@ -1011,6 +1083,11 @@
     currentGeometry = g;
 
     for (const def of definitions) {
+      if (def.type === "select") {
+        const select = document.getElementById(`select-${def.key}`);
+        if (select) select.value = state[def.key];
+        continue;
+      }
       const number = document.getElementById(`number-${def.key}`);
       const range = document.getElementById(`range-${def.key}`);
       const lim = limitFor(def.key, state);
@@ -1033,11 +1110,11 @@
     const padding = showDimensions ? { left: 29, right: 42, top: 31, bottom: 18 } : { left: 15, right: 15, top: 15, bottom: 15 };
     const sceneMaxX = showBanana ? g.maxX + bananaGap + BANANA_WIDTH : g.maxX;
     const sceneMaxY = showBanana ? Math.max(g.maxY, BANANA_HEIGHT + 10) : g.maxY;
-    profileSvg.setAttribute("viewBox", `${g.minX - padding.left} ${-padding.top} ${sceneMaxX - g.minX + padding.left + padding.right} ${sceneMaxY + padding.top + padding.bottom}`);
+    profileSvg.setAttribute("viewBox", `${g.minX - padding.left} ${g.roofTopY - padding.top} ${sceneMaxX - g.minX + padding.left + padding.right} ${sceneMaxY - g.roofTopY + padding.top + padding.bottom}`);
 
     const { volume } = buildSlices(g);
     document.getElementById("overallWidth").innerHTML = `${fmt(g.maxX - g.minX, 1)} <small>mm</small>`;
-    document.getElementById("overallHeight").innerHTML = `${fmt(g.maxY, 1)} <small>mm</small>`;
+    document.getElementById("overallHeight").innerHTML = `${fmt(g.maxY - g.roofTopY, 1)} <small>mm</small>`;
     document.getElementById("mouthGap").innerHTML = `${fmt(g.mouthGap, 2)} <small>mm</small>`;
     document.getElementById("materialVolume").innerHTML = `${fmt(volume / 1000, 1)} <small>cm³</small>`;
 
@@ -1099,7 +1176,9 @@
     const g = currentGeometry;
     const width = g.maxX - g.minX;
     const d = pathFromCommands(buildCommands(g, 0));
-    const source = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- Parametric hook side profile. Units: millimeters. Roof clear width: ${fmt(g.W)} mm. Back leg angle: ${fmt(g.backLegAngle, 1)} degrees. -->\n<svg xmlns="http://www.w3.org/2000/svg" width="${fmt(width)}mm" height="${fmt(g.maxY)}mm" viewBox="${fmt(g.minX)} 0 ${fmt(width)} ${fmt(g.maxY)}">\n  <path d="${d}" fill="#e66a42" stroke="none"/>\n</svg>\n`;
+    const top = g.roofTopY;
+    const height = g.maxY - top;
+    const source = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- Parametric hook side profile. Units: millimeters. Roof clear width: ${fmt(g.W)} mm. Back leg angle: ${fmt(g.backLegAngle, 1)} degrees. -->\n<svg xmlns="http://www.w3.org/2000/svg" width="${fmt(width)}mm" height="${fmt(height)}mm" viewBox="${fmt(g.minX)} ${fmt(top)} ${fmt(width)} ${fmt(height)}">\n  <path d="${d}" fill="#e66a42" stroke="none"/>\n</svg>\n`;
     download(new Blob([source], { type: "image/svg+xml" }), "parametric-hook.svg");
     showToast("Side profile exported as SVG");
   }
@@ -1459,6 +1538,12 @@
     draw: () => drawMesh(),
     renderer: () => gl ? "webgl" : "canvas2d",
     set: (key, value) => {
+      const select = document.getElementById(`select-${key}`);
+      if (select) {
+        select.value = value;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        return;
+      }
       const input = document.getElementById(`number-${key}`);
       if (!input) return;
       input.value = value;
