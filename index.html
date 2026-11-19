@@ -176,6 +176,7 @@
     .strain .none { color: #8a938e; }
 
     .export-row { display: flex; align-items: center; justify-content: flex-end; gap: 9px; }
+    .export-row #shareButton { margin-right: auto; }
     .button {
       display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 37px;
       padding: 8px 13px; border-radius: 8px; border: 1px solid var(--line); background: white;
@@ -289,6 +290,10 @@
           </div>
 
           <div class="export-row">
+            <button class="button" id="shareButton" type="button">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6.5 9.5a2.5 2.5 0 0 0 3.5 0l2-2a2.5 2.5 0 0 0-3.5-3.5l-1 1M9.5 6.5a2.5 2.5 0 0 0-3.5 0l-2 2a2.5 2.5 0 0 0 3.5 3.5l1-1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Share link
+            </button>
             <button class="button" id="svgButton" type="button">
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2v8m0 0 3-3m-3 3L5 7M3 12v2h10v-2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
               Export SVG
@@ -333,6 +338,7 @@
   let sliceCache = { key: "", value: null };
   let meshCache = { key: "", value: null };
   let toastTimer;
+  const STORAGE_KEY = "hangform.params.v1";
 
   const controlsRoot = document.getElementById("parameterControls");
   const profileSvg = document.getElementById("profileSvg");
@@ -548,12 +554,14 @@
       select.addEventListener("change", () => {
         state[select.dataset.key] = select.value;
         render();
+        saveState();
       });
     });
     controlsRoot.querySelectorAll(".range").forEach(input => {
       input.addEventListener("input", () => {
         state[input.dataset.key] = Number(input.value);
         render();
+        saveState();
       });
     });
     controlsRoot.querySelectorAll('input[type="number"]').forEach(input => {
@@ -565,6 +573,7 @@
         const parsed = Number(input.value);
         state[def.key] = Number.isFinite(parsed) ? clamp(parsed, lo, Math.max(lo, hi)) : defaults[def.key];
         render();
+        saveState();
       });
     });
   }
@@ -1172,6 +1181,124 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  // Compact share code: "1~<value>~<value>..." in definition order, with a
+  // leading version token so old links can be rejected instead of misread.
+  function encodeShare(s) {
+    const parts = ["1"];
+    for (const def of definitions) {
+      if (def.type === "select") {
+        const index = def.options.findIndex(option => option.value === s[def.key]);
+        parts.push(String(index >= 0 ? index : 0));
+      } else {
+        parts.push(fmt(s[def.key], 3));
+      }
+    }
+    return parts.join("~");
+  }
+
+  function decodeShare(code) {
+    if (!code) return null;
+    const parts = String(code).split("~");
+    if (parts[0] !== "1" || parts.length !== definitions.length + 1) return null;
+    const out = {};
+    for (let i = 0; i < definitions.length; i++) {
+      const def = definitions[i];
+      const raw = parts[i + 1];
+      if (def.type === "select") {
+        const index = Number(raw);
+        const option = Number.isInteger(index) ? def.options[index] : null;
+        out[def.key] = option ? option.value : defaults[def.key];
+      } else {
+        const value = Number(raw);
+        out[def.key] = Number.isFinite(value) ? value : defaults[def.key];
+      }
+    }
+    return out;
+  }
+
+  function saveState() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (error) {
+      // Storage can be unavailable (private mode, file://); sharing still works.
+    }
+  }
+
+  function loadInitialState() {
+    let loaded = null;
+    try {
+      loaded = decodeShare(new URLSearchParams(location.search).get("p"));
+    } catch (error) {
+      loaded = null;
+    }
+    if (!loaded) {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) loaded = JSON.parse(raw);
+      } catch (error) {
+        loaded = null;
+      }
+    }
+    if (loaded) {
+      for (const def of definitions) {
+        if (loaded[def.key] !== undefined) state[def.key] = loaded[def.key];
+      }
+    }
+    clampState();
+  }
+
+  async function copyText(text) {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await Promise.race([
+          navigator.clipboard.writeText(text),
+          new Promise((resolve, reject) => setTimeout(() => reject(new Error("clipboard timeout")), 1200))
+        ]);
+        return true;
+      }
+    } catch (error) {
+      // Fall through to the legacy copy path.
+    }
+    try {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.top = "-1000px";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      const ok = document.execCommand("copy");
+      area.remove();
+      return ok;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  async function shareLink() {
+    const url = new URL(location.href);
+    url.hash = "";
+    url.search = "";
+    url.searchParams.set("p", encodeShare(state));
+    const link = url.toString();
+    let updatedUrl = false;
+    try {
+      history.replaceState(null, "", link);
+      updatedUrl = true;
+    } catch (error) {
+      updatedUrl = false;
+    }
+    const copied = await copyText(link);
+    if (copied) {
+      showToast("Share link copied to clipboard");
+    } else if (updatedUrl) {
+      showToast("Link is now in the address bar — copy it from there");
+    } else {
+      window.prompt("Copy this share link:", link);
+    }
+  }
+
   function exportSvg() {
     const g = currentGeometry;
     const width = g.maxX - g.minX;
@@ -1515,12 +1642,15 @@
     Object.assign(state, defaults);
     camera.yaw = -.48; camera.pitch = -.32; camera.zoom = 1;
     render();
+    saveState();
     showToast("Defaults restored");
   });
   document.getElementById("svgButton").addEventListener("click", exportSvg);
   document.getElementById("stlButton").addEventListener("click", exportStl);
+  document.getElementById("shareButton").addEventListener("click", shareLink);
   new ResizeObserver(resizeCanvas).observe(stage);
 
+  loadInitialState();
   initGL();
   buildControls();
   render();
@@ -1536,6 +1666,7 @@
     },
     camera,
     draw: () => drawMesh(),
+    shareCode: () => encodeShare(state),
     renderer: () => gl ? "webgl" : "canvas2d",
     set: (key, value) => {
       const select = document.getElementById(`select-${key}`);
