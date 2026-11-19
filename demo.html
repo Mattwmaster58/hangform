@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Front-leg tip inset — Shear vs Rotate</title>
+<style>
+  :root {
+    --bg: #f3f1eb; --card: #fffdf8; --ink: #2c3a34; --muted: #68766f;
+    --line: #dcd8cf; --accent: #e66a42; --accent-edge: #b8472a; --ghost: #cdc8bd;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 28px 22px 48px; }
+  header h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--muted); max-width: 760px; }
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 16px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 16px; margin: 18px 0 20px; }
+  .controls label { font-weight: 650; font-size: 13px; }
+  .controls input[type=range] { flex: 1 1 260px; accent-color: var(--accent); }
+  .controls .val { font-variant-numeric: tabular-nums; font-weight: 700; min-width: 74px; }
+  .controls .hint { color: var(--muted); font-size: 12px; flex-basis: 100%; margin: -4px 0 0; }
+  .controls input[type=checkbox] { accent-color: var(--accent); }
+  .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 760px) { .panels { grid-template-columns: 1fr; } }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 14px 16px; }
+  .panel h2 { margin: 0 0 2px; font-size: 17px; }
+  .panel .sub { margin: 0 0 8px; color: var(--muted); font-size: 12.5px; }
+  .tag { display: inline-block; font-size: 10.5px; font-weight: 800; letter-spacing: .08em;
+    text-transform: uppercase; padding: 3px 7px; border-radius: 999px; margin-left: 6px; vertical-align: 2px; }
+  .tag.good { background: #dcefe7; color: #226b55; }
+  .tag.warn { background: #f7e0d8; color: #a6431f; }
+  svg { display: block; width: 100%; height: auto; }
+  .readout { display: flex; justify-content: space-between; gap: 12px; margin-top: 10px;
+    padding-top: 10px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
+  .readout b { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .foot { margin-top: 20px; color: var(--muted); font-size: 12.5px; }
+  .foot code { background: #e9e6df; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Front-leg tip inset: Shear vs Rotate</h1>
+    <p>Both panels move the front leg's tip inward by the same horizontal distance <b>d</b>.
+       The only difference is what the leg and the hook do on the way down. Drag the slider (or animate) to exaggerate it.</p>
+  </header>
+
+  <div class="controls">
+    <label for="d">Tip inset d</label>
+    <input id="d" type="range" min="0" max="60" step="0.5" value="45">
+    <span class="val" id="dval">45.0 u</span>
+    <label><input id="anim" type="checkbox"> Animate</label>
+    <p class="hint">Exaggerated for visibility. At real settings d is roughly 0.5–1&nbsp;mm over a ~120&nbsp;mm leg (well under 1°).</p>
+  </div>
+
+  <div class="panels">
+    <section class="panel">
+      <h2>Shear <span class="tag good">Recommended</span></h2>
+      <p class="sub">Top stays fixed under the roof; horizontal slices slide inward; the hook simply shifts sideways.</p>
+      <svg id="svgShear" viewBox="0 0 260 430" aria-label="Shear demonstration"></svg>
+      <div class="readout"><span>Hook throat</span><b id="shearAngle">0.0° — level</b></div>
+    </section>
+
+    <section class="panel">
+      <h2>Rotate rigidly <span class="tag warn">Tilts hook</span></h2>
+      <p class="sub">The whole leg and hook pivot about the roof, so the hook throat tilts by the leg angle.</p>
+      <svg id="svgRotate" viewBox="0 0 260 430" aria-label="Rotate demonstration"></svg>
+      <div class="readout"><span>Hook throat</span><b id="rotateAngle">—</b></div>
+    </section>
+  </div>
+
+  <p class="foot">The real part uses one of these. Shear keeps the hook opening perfectly horizontal at every
+    setting; rotate would droop it, which becomes noticeable on a short front leg or a large clamp preload.
+    Geometry is a stylised version of the actual hook profile for clarity.</p>
+</div>
+
+<script>
+  "use strict";
+  const TOP_Y = 78, BOTTOM_Y = 372, CX = 165, HALF_W = 12, LEG_LEN = BOTTOM_Y - TOP_Y;
+  const HOOK = `M ${CX} ${BOTTOM_Y} A 30 30 0 0 1 ${CX - 60} ${BOTTOM_Y} L ${CX - 60} 345`;
+  const NS = "http://www.w3.org/2000/svg";
+
+  function el(name, attrs, parent) {
+    const node = document.createElementNS(NS, name);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    if (parent) parent.appendChild(node);
+    return node;
+  }
+
+  function roof(svg) {
+    el("rect", { x: 34, y: 44, width: 200, height: 34, rx: 4, fill: "#d9d6cf", stroke: "#a8a299", "stroke-width": 1.2 }, svg);
+    el("text", { x: 40, y: 34, fill: "#68766f", "font-size": 9.5, "letter-spacing": ".08em" }, svg).textContent = "ROOF";
+  }
+
+  function hookPath(svg, attrs) {
+    return el("path", Object.assign({ d: HOOK, fill: "none", stroke: "#e66a42", "stroke-width": 24,
+      "stroke-linecap": "round" }, attrs), svg);
+  }
+
+  // ---------- shear ----------
+  const shear = document.getElementById("svgShear");
+  const sLeg = el("polygon", { fill: "#e66a42", stroke: "#b8472a", "stroke-width": 1.2 }, shear);
+  const sHookG = el("g", {}, shear);
+  hookPath(sHookG, {});
+  const sRef = el("line", { stroke: "#2f6f5b", "stroke-width": 1.1, "stroke-dasharray": "4 3" }, shear);
+  const sTip = el("circle", { r: 3.2, fill: "#2f6f5b" }, shear);
+  const sDim = el("g", {}, shear);
+  const sDimLine = el("line", { stroke: "#2f6f5b", "stroke-width": 1.1 }, sDim);
+  const sDimTxt = el("text", { fill: "#2f6f5b", "font-size": 10, "text-anchor": "middle" }, sDim);
+  roof(shear);
+
+  // ---------- rotate ----------
+  const rotate = document.getElementById("svgRotate");
+  const rGroup = el("g", {}, rotate);
+  el("rect", { x: CX - HALF_W, y: TOP_Y, width: HALF_W * 2, height: LEG_HEIGHT(), fill: "#e66a42",
+    stroke: "#b8472a", "stroke-width": 1.2 }, rGroup);
+  hookPath(rGroup, {});
+  const rRef = el("line", { stroke: "#c1552f", "stroke-width": 1.1, "stroke-dasharray": "4 3" }, rotate);
+  const rTip = el("circle", { r: 3.2, fill: "#c1552f" }, rotate);
+  roof(rotate);
+
+  function LEG_HEIGHT() { return BOTTOM_Y - TOP_Y; }
+
+  function rotPoint(x, y, deg) {
+    const a = deg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+    const dx = x - CX, dy = y - TOP_Y;
+    return { x: CX + dx * c - dy * s, y: TOP_Y + dx * s + dy * c };
+  }
+
+  function update(d) {
+    document.getElementById("dval").textContent = d.toFixed(1) + " u";
+    const theta = Math.asin(Math.min(1, d / LEG_LEN)) * 180 / Math.PI;
+
+    // shear: polygon top fixed, bottom shifted left by d; hook translated, not rotated
+    sLeg.setAttribute("points",
+      `${CX - HALF_W},${TOP_Y} ${CX + HALF_W},${TOP_Y} ${CX + HALF_W - d},${BOTTOM_Y} ${CX - HALF_W - d},${BOTTOM_Y}`);
+    sHookG.setAttribute("transform", `translate(${-d} 0)`);
+    const tip = { x: CX - 60 - d, y: 345 };
+    sRef.setAttribute("x1", 44); sRef.setAttribute("y1", tip.y);
+    sRef.setAttribute("x2", 214); sRef.setAttribute("y2", tip.y);
+    sTip.setAttribute("cx", tip.x); sTip.setAttribute("cy", tip.y);
+    sDimLine.setAttribute("x1", CX); sDimLine.setAttribute("y1", BOTTOM_Y + 16);
+    sDimLine.setAttribute("x2", CX - d); sDimLine.setAttribute("y2", BOTTOM_Y + 16);
+    sDimTxt.setAttribute("x", CX - d / 2); sDimTxt.setAttribute("y", BOTTOM_Y + 30);
+    sDimTxt.textContent = "d";
+    document.getElementById("shearAngle").textContent = "0.0° — level";
+
+    // rotate: whole leg + hook rotate about the top centre
+    rGroup.setAttribute("transform", `rotate(${-theta} ${CX} ${TOP_Y})`);
+    const rt = rotPoint(CX - 60, 345, -theta);
+    rTip.setAttribute("cx", rt.x); rTip.setAttribute("cy", rt.y);
+    const len = 150, dir = -theta * Math.PI / 180;
+    rRef.setAttribute("x1", rt.x - Math.cos(dir) * len);
+    rRef.setAttribute("y1", rt.y - Math.sin(dir) * len);
+    rRef.setAttribute("x2", rt.x + Math.cos(dir) * len);
+    rRef.setAttribute("y2", rt.y + Math.sin(dir) * len);
+    document.getElementById("rotateAngle").textContent = theta.toFixed(1) + "° — tilted";
+  }
+
+  const slider = document.getElementById("d");
+  slider.addEventListener("input", () => update(Number(slider.value)));
+
+  let raf = null, t0 = 0;
+  const anim = document.getElementById("anim");
+  function tick(ts) {
+    if (!anim.checked) { raf = null; return; }
+    if (!t0) t0 = ts;
+    const phase = (ts - t0) / 2200;
+    const d = 30 + 30 * Math.sin(phase * Math.PI * 2 - Math.PI / 2); // 0..60
+    slider.value = d.toFixed(1);
+    update(d);
+    raf = requestAnimationFrame(tick);
+  }
+  anim.addEventListener("change", () => {
+    if (anim.checked) { t0 = 0; raf = requestAnimationFrame(tick); }
+    else if (raf) { cancelAnimationFrame(raf); raf = null; }
+  });
+
+  update(45);
+</script>
+</body>
+</html>

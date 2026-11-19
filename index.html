@@ -589,30 +589,36 @@
     const F = s.frontLeg;
     const r = s.hookRadius;
     const innerFrontX = W;
-    const cx = innerFrontX + r + t;
+
+    // The back-leg angle sets the total clamp offset; it is split equally
+    // between the legs. Each leg's tip is inset by the same horizontal
+    // distance, so the short back leg tilts much more than the long front leg.
+    const angle = clamp(s.backAngle, 0, 90);
+    let totalSin = Math.sin((90 - angle) * DEG);
+    const maxSin = Math.max(0, (W - 1) / B);
+    if (totalSin > maxSin) totalSin = Math.max(0, maxSin);
+    const tipInset = (B * totalSin) / 2;
+    // Back leg: solve its angle so its tip lands at the same inset.
+    const delta = Math.asin(Math.min(1, tipInset / B));
+    const sinD = Math.sin(delta);
+    const cosD = Math.cos(delta);
+
+    const cx = innerFrontX + r + t - tipInset;
     const cy = t + F;
     const minX = -t;
     const maxX = cx + r + t;
     const hookBottomY = cy + r + t;
-
-    // Back leg leans toward the front leg as the angle drops below 90 degrees.
-    const angle = clamp(s.backAngle, 0, 90);
-    let delta = (90 - angle) * DEG;
-    const maxSin = Math.max(0, (W - 1) / B);
-    if (Math.sin(delta) > maxSin) delta = Math.asin(Math.min(1, maxSin));
-    const sinD = Math.sin(delta);
-    const cosD = Math.cos(delta);
     const backInnerBottom = { x: B * sinD, y: t + B * cosD };
     const backOuterBottom = { x: -t + B * sinD, y: t + B * cosD };
     const maxY = Math.max(hookBottomY, backInnerBottom.y);
-    const mouthGap = W - B * sinD;
+    const mouthGap = W - 2 * tipInset;
     const arched = s.roofProfile === "arched";
     const rise = Math.max(0, s.archRise || 0);
     const roofTopY = arched ? -rise : 0;
 
     return {
       W, B, F, r, t, R, ro, rt, re, cx, cy, innerFrontX,
-      minX, maxX, maxY, mouthGap,
+      minX, maxX, maxY, mouthGap, tipInset,
       backLegAngle: angle, delta, sinD, cosD,
       backInnerBottom, backOuterBottom,
       outWidth: s.outWidth,
@@ -699,7 +705,7 @@
       addL(innerFrontX + t - s - R, s);
       if (R > 1e-9) addA(innerFrontX + t - s - R, s + R, R, -Math.PI / 2, 0, false, 10);
     }
-    addL(innerFrontX + t - s, cy);
+    addL(innerFrontX + t - s - g.tipInset, cy);
 
     const a1 = Math.atan2(rt, rIn + rt);
     const a2 = Math.atan2(rt, rOut - rt);
@@ -882,7 +888,7 @@
       addL(innerFrontX + t - s - R, s);
       addA(innerFrontX + t - s - R, s + R, R, -Math.PI / 2, 0, 10);
     }
-    addL(innerFrontX + t - s, cy);
+    addL(innerFrontX + t - s - g.tipInset, cy);
 
     const a1 = Math.atan2(rt, rIn + rt);
     const a2 = Math.atan2(rt, rOut - rt);
@@ -1181,39 +1187,88 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  // Compact share code: "1~<value>~<value>..." in definition order, with a
-  // leading version token so old links can be rejected instead of misread.
-  function encodeShare(s) {
-    const parts = ["1"];
-    for (const def of definitions) {
-      if (def.type === "select") {
-        const index = def.options.findIndex(option => option.value === s[def.key]);
-        parts.push(String(index >= 0 ? index : 0));
-      } else {
-        parts.push(fmt(s[def.key], 3));
+  // Share-link schema.
+  //   v1: "1~<value>~..." positional, in a fixed order (legacy).
+  //   v2: "2~<code>,<code>,...~<value>,<value>,..." self-describing.
+  // v2 embeds the field codes, so parameters can be added later without
+  // breaking old links: unknown codes are ignored and missing ones default.
+  // v1 links keep decoding through the positional table below.
+  const SHARE_VERSION = 2;
+  const SHARE_CODES = {
+    roofWidth: "w",
+    backLeg: "bl",
+    backAngle: "ba",
+    frontLeg: "fl",
+    hookRadius: "hr",
+    thickness: "t",
+    outWidth: "ow",
+    cornerRadius: "cr",
+    edgeRadius: "er",
+    tipRadius: "tr",
+    tipEdgeRadius: "ter",
+    roofProfile: "rp",
+    archRise: "ar"
+  };
+  const SHARE_V1_ORDER = [
+    "roofWidth", "backLeg", "backAngle", "frontLeg", "hookRadius", "thickness",
+    "outWidth", "cornerRadius", "edgeRadius", "tipRadius", "tipEdgeRadius",
+    "roofProfile", "archRise"
+  ];
+  const SHARE_FIELDS = definitions
+    .filter(def => SHARE_CODES[def.key])
+    .map(def => ({ key: def.key, code: SHARE_CODES[def.key] }));
+  const SHARE_BY_CODE = Object.fromEntries(SHARE_FIELDS.map(field => [field.code, field]));
+
+  function assignShareField(out, key, raw) {
+    const def = byKey[key];
+    if (!def) return;
+    if (def.type === "select") {
+      let match = def.options.find(option => option.value === raw);
+      if (!match) {
+        const index = Number(raw);
+        match = Number.isInteger(index) ? def.options[index] : null;
       }
+      out[key] = match ? match.value : defaults[key];
+    } else {
+      const value = Number(raw);
+      if (Number.isFinite(value)) out[key] = value;
     }
-    return parts.join("~");
+  }
+
+  function encodeShare(s) {
+    const codes = SHARE_FIELDS.map(field => field.code);
+    const values = SHARE_FIELDS.map(field => {
+      const def = byKey[field.key];
+      if (def.type === "select") {
+        const index = def.options.findIndex(option => option.value === s[field.key]);
+        return String(index >= 0 ? index : 0);
+      }
+      return fmt(s[field.key], 3);
+    });
+    return [SHARE_VERSION, codes.join(","), values.join(",")].join("~");
   }
 
   function decodeShare(code) {
     if (!code) return null;
     const parts = String(code).split("~");
-    if (parts[0] !== "1" || parts.length !== definitions.length + 1) return null;
+    const version = Number(parts[0]);
     const out = {};
-    for (let i = 0; i < definitions.length; i++) {
-      const def = definitions[i];
-      const raw = parts[i + 1];
-      if (def.type === "select") {
-        const index = Number(raw);
-        const option = Number.isInteger(index) ? def.options[index] : null;
-        out[def.key] = option ? option.value : defaults[def.key];
-      } else {
-        const value = Number(raw);
-        out[def.key] = Number.isFinite(value) ? value : defaults[def.key];
+    if (version === 1) {
+      for (let i = 0; i < SHARE_V1_ORDER.length && i + 1 < parts.length; i++) {
+        assignShareField(out, SHARE_V1_ORDER[i], parts[i + 1]);
       }
+    } else if (Number.isFinite(version) && version >= 2) {
+      const codes = parts[1] ? parts[1].split(",") : [];
+      const values = parts[2] ? parts[2].split(",") : [];
+      const count = Math.min(codes.length, values.length);
+      for (let i = 0; i < count; i++) {
+        const field = SHARE_BY_CODE[codes[i]];
+        if (field) assignShareField(out, field.key, values[i]);
+      }
+    } else {
+      return null;
     }
-    return out;
+    return Object.keys(out).length ? out : null;
   }
 
   function saveState() {
