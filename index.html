@@ -124,7 +124,9 @@
       position: absolute; z-index: 3; right: 14px; top: 12px; padding: 5px 7px; border: 1px solid #e0e3dd;
       border-radius: 6px; background: rgba(255,255,255,.75); color: #87918c; font-size: 9px; font-weight: 750;
     }
-    #profileSvg { display: block; width: 100%; height: 100%; min-height: 445px; position: absolute; inset: 0; z-index: 1; }
+    #profileSvg { display: block; width: 100%; height: 100%; min-height: 445px; position: absolute; inset: 0; z-index: 1;
+      cursor: grab; touch-action: none; user-select: none; }
+    #profileSvg:active { cursor: grabbing; }
     #meshCanvas { display: none; width: 100%; height: 100%; position: absolute; inset: 0; z-index: 1; cursor: grab; touch-action: none; }
     #meshCanvas:active { cursor: grabbing; }
     .stage[data-view="3d"] #profileSvg { display: none; }
@@ -133,7 +135,6 @@
       position: absolute; z-index: 3; bottom: 12px; left: 50%; transform: translateX(-50%); white-space: nowrap;
       color: #8a938e; font-size: 9px; pointer-events: none;
     }
-    .stage[data-view="side"] .view-help { display: none; }
     .stage-toggles { position: absolute; z-index: 4; bottom: 11px; right: 12px; display: flex; align-items: center; gap: 14px; }
     .stage-toggle { display: flex; align-items: center; gap: 6px; color: #7e8983; font-size: 9px; cursor: pointer; user-select: none; }
     .stage-toggle input { accent-color: var(--accent); width: 12px; height: 12px; margin: 0; cursor: pointer; }
@@ -259,7 +260,7 @@
               <g id="dimensions" fill="#68766f" stroke="#7f8b85" stroke-width=".55" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="4.2"></g>
             </svg>
             <canvas id="meshCanvas" aria-label="Interactive 3D preview. Drag to rotate and scroll to zoom."></canvas>
-            <div class="view-help" id="viewHelp">Drag to rotate · Scroll to zoom · Double-click to reset</div>
+            <div class="view-help" id="viewHelp">Scroll to zoom · Drag to pan · Double-click to fit</div>
             <div class="stage-toggles">
               <label class="stage-toggle" id="bananaToggleWrap"><input id="bananaToggle" type="checkbox"> Banana for scale</label>
               <label class="stage-toggle" id="dimensionToggleWrap"><input id="dimensionToggle" type="checkbox" checked> Dimensions</label>
@@ -338,6 +339,9 @@
   let sliceCache = { key: "", value: null };
   let meshCache = { key: "", value: null };
   let toastTimer;
+  // Side-profile viewport is kept across parameter changes so the model does
+  // not rescale. It is fitted once, then zoomed/panned by the user.
+  const sideView = { x: 0, y: 0, w: 1, h: 1, ready: false };
   const STORAGE_KEY = "hangform.params.v1";
 
   const controlsRoot = document.getElementById("parameterControls");
@@ -1092,6 +1096,19 @@
     dimensions.innerHTML = html;
   }
 
+  function applySideView() {
+    profileSvg.setAttribute("viewBox", `${sideView.x} ${sideView.y} ${sideView.w} ${sideView.h}`);
+  }
+
+  // Client pixel -> SVG user coordinate, accounting for preserveAspectRatio="meet".
+  function clientToUser(clientX, clientY) {
+    const rect = profileSvg.getBoundingClientRect();
+    const scale = Math.min(rect.width / sideView.w, rect.height / sideView.h) || 1;
+    const ox = (rect.width - sideView.w * scale) / 2;
+    const oy = (rect.height - sideView.h * scale) / 2;
+    return { x: sideView.x + (clientX - rect.left - ox) / scale, y: sideView.y + (clientY - rect.top - oy) / scale, scale };
+  }
+
   function render() {
     clampState();
     const g = buildGeometry(state);
@@ -1125,7 +1142,14 @@
     const padding = showDimensions ? { left: 29, right: 42, top: 31, bottom: 18 } : { left: 15, right: 15, top: 15, bottom: 15 };
     const sceneMaxX = showBanana ? g.maxX + bananaGap + BANANA_WIDTH : g.maxX;
     const sceneMaxY = showBanana ? Math.max(g.maxY, BANANA_HEIGHT + 10) : g.maxY;
-    profileSvg.setAttribute("viewBox", `${g.minX - padding.left} ${g.roofTopY - padding.top} ${sceneMaxX - g.minX + padding.left + padding.right} ${sceneMaxY - g.roofTopY + padding.top + padding.bottom}`);
+    if (!sideView.ready) {
+      sideView.x = g.minX - padding.left;
+      sideView.y = g.roofTopY - padding.top;
+      sideView.w = sceneMaxX - g.minX + padding.left + padding.right;
+      sideView.h = sceneMaxY - g.roofTopY + padding.top + padding.bottom;
+      sideView.ready = true;
+    }
+    applySideView();
 
     const { volume } = buildSlices(g);
     document.getElementById("overallWidth").innerHTML = `${fmt(g.maxX - g.minX, 1)} <small>mm</small>`;
@@ -1165,6 +1189,9 @@
     document.getElementById("sideTab").setAttribute("aria-pressed", String(mode === "side"));
     document.getElementById("meshTab").setAttribute("aria-pressed", String(mode === "3d"));
     document.getElementById("stageLabel").textContent = mode === "side" ? "SIDE ELEVATION" : "EXTRUDED MODEL";
+    document.getElementById("viewHelp").textContent = mode === "side"
+      ? "Scroll to zoom · Drag to pan · Double-click to fit"
+      : "Drag to rotate · Scroll to zoom · Double-click to reset";
     if (mode === "3d") requestAnimationFrame(resizeCanvas);
   }
 
@@ -1386,6 +1413,8 @@
   let glColBuffer = null;
   let glCount = 0;
   let glBounds = null;
+  // Base 3D fit captured once, so parameter changes do not rescale the model.
+  let fit3d = null;
   let glUniforms = {};
   let glSceneKey = "";
 
@@ -1569,7 +1598,8 @@
       minY = Math.min(minY, c[1]); maxY = Math.max(maxY, c[1]);
       maxAbsZ = Math.max(maxAbsZ, Math.abs(c[2]));
     }
-    const scale = Math.min((width - 100) / Math.max(1, maxX - minX), (height - 82) / Math.max(1, maxY - minY)) * camera.zoom;
+    if (!fit3d) fit3d = { x: Math.max(1, maxX - minX), y: Math.max(1, maxY - minY) };
+    const scale = Math.min((width - 100) / fit3d.x, (height - 82) / fit3d.y) * camera.zoom;
     const sx = 2 * scale / width;
     const sy2 = 2 * scale / height;
     gl.uniform2f(glUniforms.scale, sx, sy2);
@@ -1593,7 +1623,8 @@
     const all = rotated.flatMap(t => t.points);
     const minX = Math.min(...all.map(p => p[0])), maxX = Math.max(...all.map(p => p[0]));
     const minY = Math.min(...all.map(p => p[1])), maxY = Math.max(...all.map(p => p[1]));
-    fallbackScale = Math.min((width - 100) / Math.max(1, maxX - minX), (height - 82) / Math.max(1, maxY - minY)) * camera.zoom;
+    if (!fit3d) fit3d = { x: Math.max(1, maxX - minX), y: Math.max(1, maxY - minY) };
+    fallbackScale = Math.min((width - 100) / fit3d.x, (height - 82) / fit3d.y) * camera.zoom;
     fallbackOffset = [width / 2 - (minX + maxX) / 2 * fallbackScale, height / 2 + (minY + maxY) / 2 * fallbackScale];
     rotated.sort((a, b) => a.depth - b.depth);
 
@@ -1686,16 +1717,56 @@
   }, { passive: false });
   canvas.addEventListener("dblclick", () => {
     camera.yaw = -.48; camera.pitch = -.32; camera.zoom = 1;
+    fit3d = null;
     drawMesh();
+  });
+
+  // Side profile: scroll to zoom around the cursor, drag to pan, double-click
+  // to refit. The viewport is otherwise left alone so parameters never rescale.
+  profileSvg.addEventListener("wheel", event => {
+    if (mode !== "side") return;
+    event.preventDefault();
+    const cursor = clientToUser(event.clientX, event.clientY);
+    const factor = Math.exp(-event.deltaY * .0015);
+    const nextW = Math.max(3, Math.min(4000, sideView.w / factor));
+    const k = nextW / sideView.w;
+    sideView.x = cursor.x - (cursor.x - sideView.x) * k;
+    sideView.y = cursor.y - (cursor.y - sideView.y) * k;
+    sideView.w *= k;
+    sideView.h *= k;
+    applySideView();
+  }, { passive: false });
+
+  let sideDrag = null;
+  profileSvg.addEventListener("pointerdown", event => {
+    if (mode !== "side" || event.button !== 0) return;
+    const scale = clientToUser(event.clientX, event.clientY).scale;
+    sideDrag = { x: event.clientX, y: event.clientY, vx: sideView.x, vy: sideView.y, scale };
+    try { profileSvg.setPointerCapture(event.pointerId); } catch (error) { /* synthetic events */ }
+  });
+  profileSvg.addEventListener("pointermove", event => {
+    if (!sideDrag) return;
+    sideView.x = sideDrag.vx - (event.clientX - sideDrag.x) / sideDrag.scale;
+    sideView.y = sideDrag.vy - (event.clientY - sideDrag.y) / sideDrag.scale;
+    applySideView();
+  });
+  profileSvg.addEventListener("pointerup", () => { sideDrag = null; });
+  profileSvg.addEventListener("pointercancel", () => { sideDrag = null; });
+  profileSvg.addEventListener("dblclick", () => {
+    if (mode !== "side") return;
+    sideView.ready = false;
+    render();
   });
 
   document.getElementById("sideTab").addEventListener("click", () => setMode("side"));
   document.getElementById("meshTab").addEventListener("click", () => setMode("3d"));
-  document.getElementById("bananaToggle").addEventListener("change", event => { showBanana = event.target.checked; render(); });
+  document.getElementById("bananaToggle").addEventListener("change", event => { showBanana = event.target.checked; sideView.ready = false; render(); });
   document.getElementById("dimensionToggle").addEventListener("change", event => { showDimensions = event.target.checked; render(); });
   document.getElementById("resetButton").addEventListener("click", () => {
     Object.assign(state, defaults);
     camera.yaw = -.48; camera.pitch = -.32; camera.zoom = 1;
+    fit3d = null;
+    sideView.ready = false;
     render();
     saveState();
     showToast("Defaults restored");
@@ -1722,6 +1793,7 @@
     camera,
     draw: () => drawMesh(),
     shareCode: () => encodeShare(state),
+    fit: () => ({ side: { ...sideView }, three: fit3d ? { ...fit3d } : null }),
     renderer: () => gl ? "webgl" : "canvas2d",
     set: (key, value) => {
       const select = document.getElementById(`select-${key}`);
