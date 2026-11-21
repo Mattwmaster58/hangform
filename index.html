@@ -681,10 +681,10 @@
     // must carry the same number of vertices, so these may only depend on
     // parameters, never on the slice's edge setback.
     const seg = {
-      hook: chordSegments(Math.PI * (r + t), 0.22 / detail, Math.round(32 * detail), Math.round(520 * detail)),
-      corner: chordSegments((Math.PI / 2) * R, 0.32 / detail, Math.round(12 * detail), Math.round(180 * detail)),
-      tip: chordSegments((Math.PI / 2) * rt, 0.22 / detail, Math.round(12 * detail), Math.round(140 * detail)),
-      arch: chordSegments(halfEllipseLength(W / 2, rise), 0.4 / detail, Math.round(16 * detail), Math.round(360 * detail))
+      hook: chordSegments(Math.PI * (r + t), 0.4 / detail, Math.round(32 * detail), Math.round(340 * detail)),
+      corner: chordSegments((Math.PI / 2) * R, 0.4 / detail, Math.round(12 * detail), Math.round(150 * detail)),
+      tip: chordSegments((Math.PI / 2) * rt, 0.4 / detail, Math.round(12 * detail), Math.round(120 * detail)),
+      arch: chordSegments(halfEllipseLength(W / 2, rise), 0.4 / detail, Math.round(16 * detail), Math.round(200 * detail))
     };
 
     return {
@@ -907,9 +907,9 @@
     const pos = new Set([0, half]);
     for (const rad of radii) {
       const inner = Math.max(0, half - rad);
-      // Round the out-of-plane edges with a fine enough chord to read as a
-      // fillet rather than a chamfer.
-      const k = clamp(Math.ceil((Math.PI / 2) * rad / (0.28 / detail)), Math.round(12 * detail), Math.round(40 * detail));
+      // Out-of-plane rounding: a 0.4 mm chord keeps the fillet reading as a
+    // round while roughly halving the ring count versus a finer setting.
+    const k = clamp(Math.ceil((Math.PI / 2) * rad / (0.4 / detail)), Math.round(10 * detail), Math.round(24 * detail));
       pos.add(inner);
       for (let i = 0; i <= k; i++) {
         const phi = (i / k) * Math.PI / 2;
@@ -1217,7 +1217,7 @@
   }
 
   function meshDetail() {
-    return performance.now() - lastInputAt < INTERACTION_MS ? 0.45 : 1;
+    return performance.now() - lastInputAt < INTERACTION_MS ? 0.6 : 1;
   }
 
   function scheduleVolume() {
