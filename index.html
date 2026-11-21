@@ -508,6 +508,18 @@
   const DEG = Math.PI / 180;
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
+  // Tessellation is driven by a target chord length, so curved features stay
+  // smooth without spending facets on small radii.
+  const chordSegments = (length, maxChord, min, max) =>
+    clamp(Math.ceil(Math.abs(length) / maxChord), min, max);
+
+  // Perimeter of a half ellipse (Ramanujan's full-ellipse approximation, halved).
+  function halfEllipseLength(a, b) {
+    const A = Math.abs(a), B = Math.abs(b);
+    if (B < 1e-9) return 2 * A;
+    return Math.PI * (3 * (A + B) - Math.sqrt((3 * A + B) * (A + 3 * B))) / 4;
+  }
+
   // Reference working strains for printed parts (roughly the elastic limit).
   const PLA_STRAIN = 0.015;
   const PETG_STRAIN = 0.025;
@@ -652,9 +664,19 @@
     const rise = Math.max(0, s.archRise || 0);
     const roofTopY = arched ? -rise : 0;
 
+    // Arc sampling counts, fixed for the whole solid: every slice of the loft
+    // must carry the same number of vertices, so these may only depend on
+    // parameters, never on the slice's edge setback.
+    const seg = {
+      hook: chordSegments(Math.PI * (r + t), 0.22, 32, 520),
+      corner: chordSegments((Math.PI / 2) * R, 0.32, 12, 180),
+      tip: chordSegments((Math.PI / 2) * rt, 0.22, 12, 140),
+      arch: chordSegments(halfEllipseLength(W / 2, rise), 0.4, 16, 360)
+    };
+
     return {
       W, B, F, r, t, R, ro, rt, re, cx, cy, innerFrontX,
-      minX, maxX, maxY, mouthGap, tipInset,
+      minX, maxX, maxY, mouthGap, tipInset, seg,
       backLegAngle: angle, delta, sinD, cosD,
       backInnerBottom, backOuterBottom,
       outWidth: s.outWidth,
@@ -734,12 +756,12 @@
     if (g.arched) {
       // Arched roof: the top face is the outward arch spanning both leg tops.
       addL(outerTopX, s);
-      for (const p of archPoints(W / 2, s, W / 2 + t - s, g.rise, Math.PI, 0, ARCH_STEPS)) addL(p.x, p.y);
+      for (const p of archPoints(W / 2, s, W / 2 + t - s, g.rise, Math.PI, 0, g.seg.arch)) addL(p.x, p.y);
     } else {
       if (s + R < t - 1e-9) addL(outerTopX, s + R);
-      if (R > 1e-9) addA(outerTopX + R, s + R, R, Math.PI, Math.PI * 1.5, false, 10);
+      if (R > 1e-9) addA(outerTopX + R, s + R, R, Math.PI, Math.PI * 1.5, false, g.seg.corner);
       addL(innerFrontX + t - s - R, s);
-      if (R > 1e-9) addA(innerFrontX + t - s - R, s + R, R, -Math.PI / 2, 0, false, 10);
+      if (R > 1e-9) addA(innerFrontX + t - s - R, s + R, R, -Math.PI / 2, 0, false, g.seg.corner);
     }
     addL(innerFrontX + t - s - g.tipInset, cy);
 
@@ -748,7 +770,7 @@
     const L1 = Math.hypot(rIn + rt, rt);
     const L2 = Math.hypot(rOut - rt, rt);
 
-    addA(cx, cy, rIn, Math.PI, theta + a1, true, 40);
+    addA(cx, cy, rIn, Math.PI, theta + a1, true, g.seg.hook);
 
     const erx = Math.cos(theta), ery = Math.sin(theta);
     const etx = -Math.sin(theta), ety = Math.cos(theta);
@@ -760,7 +782,7 @@
       const t1y = cy + rIn * (c1y - cy) / L1;
       const e1x = cx + (rIn + rt) * erx;
       const e1y = cy + (rIn + rt) * ery;
-      addA(c1x, c1y, rt, Math.atan2(t1y - c1y, t1x - c1x), Math.atan2(e1y - c1y, e1x - c1x), false, 8);
+      addA(c1x, c1y, rt, Math.atan2(t1y - c1y, t1x - c1x), Math.atan2(e1y - c1y, e1x - c1x), false, g.seg.tip);
 
       const c2x = cx + (rOut - rt) * erx + rt * etx;
       const c2y = cy + (rOut - rt) * ery + rt * ety;
@@ -769,23 +791,23 @@
       const e2x = cx + (rOut - rt) * erx;
       const e2y = cy + (rOut - rt) * ery;
       if (Math.hypot(e2x - e1x, e2y - e1y) > 1e-9) addL(e2x, e2y);
-      addA(c2x, c2y, rt, Math.atan2(e2y - c2y, e2x - c2x), Math.atan2(t2y - c2y, t2x - c2x), false, 8);
+      addA(c2x, c2y, rt, Math.atan2(e2y - c2y, e2x - c2x), Math.atan2(t2y - c2y, t2x - c2x), false, g.seg.tip);
     } else {
       addL(cx + rOut * erx, cy + rOut * ery);
     }
 
-    addA(cx, cy, rOut, theta + a2, Math.PI, false, 40);
+    addA(cx, cy, rOut, theta + a2, Math.PI, false, g.seg.hook);
     addL(innerFrontX, t);
     if (g.arched) {
       // Underside follows the same ellipse so it nests on the domed object.
-      for (const p of archPoints(W / 2, t, W / 2, g.rise, 0, Math.PI, ARCH_STEPS)) addL(p.x, p.y);
+      for (const p of archPoints(W / 2, t, W / 2, g.rise, 0, Math.PI, g.seg.arch)) addL(p.x, p.y);
     } else {
       addL(0, t);
     }
     addL(innerBottom.x, innerBottom.y);
     if (bottomFillet) {
       addL(bottomFillet.T2.x, bottomFillet.T2.y);
-      addA(bottomFillet.C.x, bottomFillet.C.y, bottomFillet.r, bottomFillet.aStart, bottomFillet.aEnd, bottomFillet.delta < 0, 12);
+      addA(bottomFillet.C.x, bottomFillet.C.y, bottomFillet.r, bottomFillet.aStart, bottomFillet.aEnd, bottomFillet.delta < 0, g.seg.corner);
     }
     cmds.push({ type: "Z" });
     return cmds;
@@ -868,10 +890,12 @@
     const half = g.outWidth / 2;
     const radii = [g.re, g.ro].filter(rad => rad > 1e-9);
     if (!radii.length) return [-half, half];
-    const k = 10;
     const pos = new Set([0, half]);
     for (const rad of radii) {
       const inner = Math.max(0, half - rad);
+      // Round the out-of-plane edges with a fine enough chord to read as a
+      // fillet rather than a chamfer.
+      const k = clamp(Math.ceil((Math.PI / 2) * rad / 0.28), 12, 40);
       pos.add(inner);
       for (let i = 0; i <= k; i++) {
         const phi = (i / k) * Math.PI / 2;
@@ -917,12 +941,12 @@
     addL(outerTopX, t);
     if (g.arched) {
       addL(outerTopX, s);
-      for (const p of archPoints(W / 2, s, W / 2 + t - s, g.rise, Math.PI, 0, ARCH_STEPS)) addL(p.x, p.y);
+      for (const p of archPoints(W / 2, s, W / 2 + t - s, g.rise, Math.PI, 0, g.seg.arch)) addL(p.x, p.y);
     } else {
       addL(outerTopX, s + R);
-      addA(outerTopX + R, s + R, R, Math.PI, Math.PI * 1.5, 10);
+      addA(outerTopX + R, s + R, R, Math.PI, Math.PI * 1.5, g.seg.corner);
       addL(innerFrontX + t - s - R, s);
-      addA(innerFrontX + t - s - R, s + R, R, -Math.PI / 2, 0, 10);
+      addA(innerFrontX + t - s - R, s + R, R, -Math.PI / 2, 0, g.seg.corner);
     }
     addL(innerFrontX + t - s - g.tipInset, cy);
 
@@ -931,7 +955,7 @@
     const L1 = Math.hypot(rIn + rt, rt);
     const L2 = Math.hypot(rOut - rt, rt);
 
-    addA(cx, cy, rIn, Math.PI, theta + a1, 40);
+    addA(cx, cy, rIn, Math.PI, theta + a1, g.seg.hook);
 
     const erx = Math.cos(theta), ery = Math.sin(theta);
     const etx = -Math.sin(theta), ety = Math.cos(theta);
@@ -944,7 +968,7 @@
     const e1y = cy + (rIn + rt) * ery;
     const a10 = rt > 1e-9 ? Math.atan2(t1y - c1y, t1x - c1x) : theta;
     const a11 = rt > 1e-9 ? Math.atan2(e1y - c1y, e1x - c1x) : theta;
-    addA(c1x, c1y, rt, a10, a11, 8);
+    addA(c1x, c1y, rt, a10, a11, g.seg.tip);
 
     const c2x = cx + (rOut - rt) * erx + rt * etx;
     const c2y = cy + (rOut - rt) * ery + rt * ety;
@@ -955,19 +979,25 @@
     addL(e2x, e2y);
     const a20 = rt > 1e-9 ? Math.atan2(e2y - c2y, e2x - c2x) : theta;
     const a21 = rt > 1e-9 ? Math.atan2(t2y - c2y, t2x - c2x) : theta;
-    addA(c2x, c2y, rt, a20, a21, 8);
+    addA(c2x, c2y, rt, a20, a21, g.seg.tip);
 
-    addA(cx, cy, rOut, theta + a2, Math.PI, 40);
+    addA(cx, cy, rOut, theta + a2, Math.PI, g.seg.hook);
     addL(innerFrontX, t);
     if (g.arched) {
-      for (const p of archPoints(W / 2, t, W / 2, g.rise, 0, Math.PI, ARCH_STEPS)) addL(p.x, p.y);
+      for (const p of archPoints(W / 2, t, W / 2, g.rise, 0, Math.PI, g.seg.arch)) addL(p.x, p.y);
     } else {
       addL(0, t);
     }
     addL(innerBottom.x, innerBottom.y);
     if (bottomFillet) {
       addL(bottomFillet.T2.x, bottomFillet.T2.y);
-      addA(bottomFillet.C.x, bottomFillet.C.y, bottomFillet.r, bottomFillet.aStart, bottomFillet.aEnd, 12);
+      addA(bottomFillet.C.x, bottomFillet.C.y, bottomFillet.r, bottomFillet.aStart, bottomFillet.aEnd, g.seg.corner);
+    } else {
+      // The fillet shrinks with the edge setback and disappears at the
+      // outermost slices. Repeat the sharp corner so every slice keeps the
+      // same vertex count, which the loft relies on; the resulting zero-area
+      // triangles are dropped afterwards.
+      for (let i = 0; i <= g.seg.corner; i++) addL(outerBottom.x, outerBottom.y);
     }
 
     const pts = sampleFixedTopology(cmds);
@@ -1679,6 +1709,48 @@
     }
   }
 
+  // Crease-preserving vertex normals: a vertex averages the normals of the
+  // faces meeting there while they are within SMOOTH_ANGLE of each other, so
+  // curved surfaces shade smoothly but genuine edges stay sharp.
+  const SMOOTH_ANGLE = 38 * DEG;
+  const SMOOTH_COS = Math.cos(SMOOTH_ANGLE);
+
+  function buildSmoothNormals(items) {
+    const faceNormals = items.map(item => normal(item.pts));
+    const keyOf = p => `${Math.round(p[0] * 1e4)},${Math.round(p[1] * 1e4)},${Math.round(p[2] * 1e4)}`;
+    const buckets = new Map();
+    items.forEach((item, index) => {
+      for (const p of item.pts) {
+        const key = keyOf(p);
+        const bucket = buckets.get(key);
+        if (bucket) {
+          if (bucket[bucket.length - 1] !== index) bucket.push(index);
+        } else {
+          buckets.set(key, [index]);
+        }
+      }
+    });
+    const out = new Float32Array(items.length * 9);
+    items.forEach((item, index) => {
+      const n = faceNormals[index];
+      for (let v = 0; v < 3; v++) {
+        const bucket = buckets.get(keyOf(item.pts[v])) || [];
+        let x = 0, y = 0, z = 0;
+        for (const other of bucket) {
+          const m = faceNormals[other];
+          if (m[0] * n[0] + m[1] * n[1] + m[2] * n[2] < SMOOTH_COS) continue;
+          x += m[0]; y += m[1]; z += m[2];
+        }
+        const length = Math.hypot(x, y, z);
+        if (length < 1e-9) { x = n[0]; y = n[1]; z = n[2]; }
+        else { x /= length; y /= length; z /= length; }
+        const offset = index * 9 + v * 3;
+        out[offset] = x; out[offset + 1] = y; out[offset + 2] = z;
+      }
+    });
+    return out;
+  }
+
   function buildSceneTriangles(mesh) {
     const hookColor = [230 / 255, 106 / 255, 66 / 255];
     const items = mesh.map(pts => ({ pts, color: hookColor }));
@@ -1694,7 +1766,7 @@
   function uploadGL(mesh, sceneKey) {
     const items = buildSceneTriangles(mesh);
     const positions = new Float32Array(items.length * 9);
-    const normals = new Float32Array(items.length * 9);
+    const normals = buildSmoothNormals(items);
     const colors = new Float32Array(items.length * 9);
     const min = [Infinity, Infinity, Infinity];
     const max = [-Infinity, -Infinity, -Infinity];
@@ -1702,15 +1774,11 @@
     for (const item of items) {
       const triangle = item.pts;
       const col = item.color;
-      const n = normal(triangle);
       for (let v = 0; v < 3; v++) {
         const p = triangle[v];
         positions[offset] = p[0];
         positions[offset + 1] = p[1];
         positions[offset + 2] = p[2];
-        normals[offset] = n[0];
-        normals[offset + 1] = n[1];
-        normals[offset + 2] = n[2];
         colors[offset] = col[0];
         colors[offset + 1] = col[1];
         colors[offset + 2] = col[2];
