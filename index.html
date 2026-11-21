@@ -193,6 +193,24 @@
     }
     .toast.visible { opacity: 1; transform: translate(-50%, 0); }
 
+    /* Drag & drop target for restoring parameters from an exported STL. */
+    .drop-overlay {
+      position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center;
+      padding: 24px; background: rgba(243, 241, 235, .78); backdrop-filter: blur(3px);
+      pointer-events: none;
+    }
+    body.drop-active .drop-overlay { display: flex; }
+    body.drop-active { cursor: copy; }
+    .drop-card {
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+      padding: 30px 42px 32px; border: 2px dashed var(--accent); border-radius: 18px;
+      background: rgba(255, 255, 255, .92); color: var(--ink); text-align: center;
+      box-shadow: 0 18px 45px rgba(35, 48, 42, .12);
+    }
+    .drop-card .drop-icon { color: var(--accent); margin-bottom: 4px; }
+    .drop-card strong { font-size: 16px; letter-spacing: -.01em; }
+    .drop-card span { color: var(--muted); font-size: 12px; }
+
     @media (max-width: 920px) {
       .shell { padding: 0 20px 24px; }
       .workspace { grid-template-columns: 285px minmax(0, 1fr); }
@@ -310,14 +328,24 @@
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+  <div class="drop-overlay" id="dropOverlay" aria-hidden="true">
+    <div class="drop-card">
+      <svg class="drop-icon" width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M12 3v11m0 0 4-4m-4 4-4-4M4 17v3h16v-3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <strong>Drop a Hangform STL</strong>
+      <span>The parameters it was built with will be restored.</span>
+    </div>
+  </div>
+
   <script>
 (() => {
   "use strict";
 
   const definitions = [
-    { key: "roofWidth", label: "Roof clear width", group: "Support fit", min: 4, max: 100, step: 1, value: 40 },
+    { key: "roofWidth", label: "Roof clear width", group: "Support fit", min: 4, max: 100, step: 0.2, value: 40 },
     { key: "backLeg", label: "Back leg length", group: "Support fit", min: 10, max: 80, step: 1, value: 28 },
-    { key: "backAngle", label: "Back leg angle", group: "Support fit", min: 85, max: 90, step: 0.5, value: 89, unit: "°" },
+    { key: "backAngle", label: "Back leg angle", group: "Support fit", min: 82.5, max: 90, step: 0.5, value: 89, unit: "°" },
     { key: "frontLeg", label: "Front leg length", group: "Hook geometry", min: 45, max: 240, step: 1, value: 120 },
     { key: "hookRadius", label: "Hook inside radius", group: "Hook geometry", min: 6, max: 50, step: 1, value: 18 },
     { key: "thickness", label: "Profile thickness", group: "Stock", min: 1, max: 12, step: 0.5, value: 5 },
@@ -492,10 +520,14 @@
     if (key === "tipRadius") return { min: 0, max: t / 2 };
     if (key === "tipEdgeRadius") return { min: 0, max: Math.min(s.outWidth / 2, t) };
     if (key === "backAngle") {
-      const ratio = clamp((s.roofWidth - 1.5) / s.backLeg, 0, 0.9);
+      // The tip inset is split between the legs, so each tip travels
+      // (B*sin(tilt))/2 inward. Keep at least 1 mm of mouth left so the legs
+      // can never cross, then stay inside the angle range the UI allows.
+      const ratio = clamp((s.roofWidth - 1) / s.backLeg, 0, 1);
       const maxTilt = Math.asin(ratio) / DEG;
-      const rawMin = 90 - maxTilt;
-      return { min: Math.min(90, Math.ceil(rawMin / 0.5) * 0.5), max: 90 };
+      const dynamicMin = Math.ceil((90 - maxTilt) / 0.5) * 0.5;
+      const floor = byKey.backAngle.min;
+      return { min: Math.min(90, Math.max(floor, dynamicMin)), max: 90 };
     }
     const def = byKey[key];
     return { min: def.min, max: def.max };
@@ -1306,6 +1338,139 @@
     }
   }
 
+  // ---- STL parameter stamping -------------------------------------------
+  // Exported binary STLs carry their parameters twice:
+  //   1. a compact positional list inside the 80-byte header, so a human (or
+  //      any tool that keeps the header) can read them back, and
+  //   2. a self-describing trailer after the last facet, which keeps working
+  //      even if a tool rewrites the header and can grow as parameters are
+  //      added later.
+  // Import prefers the trailer and falls back to the header, so an STL only
+  // loses its parameters if something strips both.
+  const STL_MAGIC = "HFSTL1";
+  const STL_FOOTER_TAG = "HFMTL1";
+  const STL_FOOTER_PREFIX = "HFP1:";
+  const STL_HEADER_NOTE = "params in trailer";
+
+  // Fixed-order, positional, versioned list. Bump the leading token if fields
+  // are ever added so older files keep decoding against this order.
+  function encodeStlParams(s) {
+    const values = SHARE_V1_ORDER.map(key => {
+      const def = byKey[key];
+      if (def.type === "select") {
+        const index = def.options.findIndex(option => option.value === s[key]);
+        return String(index >= 0 ? index : 0);
+      }
+      return fmt(s[key], 3);
+    });
+    return `1,${values.join(",")}`;
+  }
+
+  function decodeStlParams(text) {
+    const parts = String(text).split(",");
+    if (parts[0] !== "1") return null;
+    const out = {};
+    for (let i = 0; i < SHARE_V1_ORDER.length && i + 1 < parts.length; i++) {
+      assignShareField(out, SHARE_V1_ORDER[i], parts[i + 1]);
+    }
+    return Object.keys(out).length ? out : null;
+  }
+
+  function writeStlHeader(view, s) {
+    const full = `Hangform ${STL_MAGIC} ${encodeStlParams(s)}`;
+    const text = full.length <= 80 ? full : `Hangform ${STL_MAGIC} ${STL_HEADER_NOTE}`;
+    for (let i = 0; i < 80; i++) view.setUint8(i, i < text.length ? text.charCodeAt(i) : 32);
+  }
+
+  function buildStlFooter(s) {
+    const payload = new TextEncoder().encode(`${STL_FOOTER_PREFIX}${encodeShare(s)}`);
+    const footer = new Uint8Array(payload.length + 4 + STL_FOOTER_TAG.length);
+    footer.set(payload, 0);
+    new DataView(footer.buffer).setUint32(payload.length, payload.length, true);
+    for (let i = 0; i < STL_FOOTER_TAG.length; i++) {
+      footer[payload.length + 4 + i] = STL_FOOTER_TAG.charCodeAt(i);
+    }
+    return footer;
+  }
+
+  function asciiAt(bytes, start, length) {
+    if (start < 0 || start + length > bytes.length) return "";
+    let out = "";
+    for (let i = start; i < start + length; i++) out += String.fromCharCode(bytes[i]);
+    return out;
+  }
+
+  // Decode the parameter payload out of a binary STL buffer.
+  // Returns { params, source } or { params: null, reason }.
+  function readStlParameters(buffer) {
+    const bytes = new Uint8Array(buffer);
+    if (bytes.length < 84) {
+      return { params: null, reason: "That file is too small to be an STL." };
+    }
+    const tagStart = bytes.length - STL_FOOTER_TAG.length;
+    if (asciiAt(bytes, tagStart, STL_FOOTER_TAG.length) === STL_FOOTER_TAG) {
+      const view = new DataView(buffer);
+      const lengthAt = tagStart - 4;
+      const length = view.getUint32(lengthAt, true);
+      const payloadStart = lengthAt - length;
+      if (length > 0 && payloadStart >= 84) {
+        const payload = asciiAt(bytes, payloadStart, length);
+        if (payload.startsWith(STL_FOOTER_PREFIX)) {
+          const params = decodeShare(payload.slice(STL_FOOTER_PREFIX.length));
+          if (params) return { params, source: "trailer" };
+        }
+      }
+    }
+    const header = asciiAt(bytes, 0, Math.min(80, bytes.length));
+    const magicAt = header.indexOf(STL_MAGIC);
+    if (magicAt >= 0) {
+      const params = decodeStlParams(header.slice(magicAt + STL_MAGIC.length).trim());
+      if (params) return { params, source: "header" };
+    }
+    return {
+      params: null,
+      reason: "No Hangform parameters in that STL. Only STLs exported from this page can restore a design."
+    };
+  }
+
+  function applyImportedParams(imported) {
+    Object.assign(state, defaults, imported);
+    clampState();
+    // Importing is like opening a document: refit both views to the new part.
+    sideView.ready = false;
+    fit3d = null;
+    render();
+    saveState();
+  }
+
+  async function importStlFile(file) {
+    if (!file) return false;
+    if (!/\.stl$/i.test(file.name || "")) {
+      showToast("Drop an .stl file exported from this page.");
+      return false;
+    }
+    if (file.size > 256 * 1024 * 1024) {
+      showToast("That STL is too large to import.");
+      return false;
+    }
+    let buffer;
+    try {
+      buffer = await file.arrayBuffer();
+    } catch (error) {
+      showToast("Could not read that file.");
+      return false;
+    }
+    const result = readStlParameters(buffer);
+    if (!result.params) {
+      showToast(result.reason);
+      return false;
+    }
+    applyImportedParams(result.params);
+    const source = result.source === "header" ? "header only" : "full metadata";
+    showToast(`Restored parameters from ${file.name} · ${source}`);
+    return true;
+  }
+
   function loadInitialState() {
     let loaded = null;
     try {
@@ -1669,26 +1834,32 @@
     else if (fallbackCtx) draw2D(mesh);
   }
 
+  function buildStlBuffer() {
+    const mesh = getMesh();
+    const footer = buildStlFooter(state);
+    const buffer = new ArrayBuffer(84 + mesh.length * 50 + footer.length);
+    const view = new DataView(buffer);
+    writeStlHeader(view, state);
+    view.setUint32(80, mesh.length, true);
+    let offset = 84;
+    for (const triangle of mesh) {
+      const n = normal(triangle);
+      for (const value of [...n, ...triangle[0], ...triangle[1], ...triangle[2]]) {
+        view.setFloat32(offset, value, true);
+        offset += 4;
+      }
+      view.setUint16(offset, 0, true);
+      offset += 2;
+    }
+    new Uint8Array(buffer, offset).set(footer);
+    return { buffer, facets: mesh.length };
+  }
+
   function exportStl() {
     try {
-      const mesh = getMesh();
-      const buffer = new ArrayBuffer(84 + mesh.length * 50);
-      const view = new DataView(buffer);
-      const header = "Hangform parametric hook - units millimeters";
-      for (let i = 0; i < Math.min(80, header.length); i++) view.setUint8(i, header.charCodeAt(i));
-      view.setUint32(80, mesh.length, true);
-      let offset = 84;
-      for (const triangle of mesh) {
-        const n = normal(triangle);
-        for (const value of [...n, ...triangle[0], ...triangle[1], ...triangle[2]]) {
-          view.setFloat32(offset, value, true);
-          offset += 4;
-        }
-        view.setUint16(offset, 0, true);
-        offset += 2;
-      }
+      const { buffer, facets } = buildStlBuffer();
       download(new Blob([buffer], { type: "model/stl" }), "parametric-hook.stl");
-      showToast(`Watertight STL exported · ${mesh.length.toLocaleString()} facets`);
+      showToast(`Watertight STL exported · ${facets.toLocaleString()} facets`);
     } catch (error) {
       showToast(error.message || "Could not export this geometry");
     }
@@ -1774,6 +1945,63 @@
   document.getElementById("svgButton").addEventListener("click", exportSvg);
   document.getElementById("stlButton").addEventListener("click", exportStl);
   document.getElementById("shareButton").addEventListener("click", shareLink);
+
+  // ---- Page-wide drag & drop: restore parameters from an exported STL ----
+  const dropOverlay = document.getElementById("dropOverlay");
+  let dragDepth = 0;
+
+  function carriesFiles(event) {
+    const types = event.dataTransfer && event.dataTransfer.types;
+    return !!types && Array.prototype.indexOf.call(types, "Files") >= 0;
+  }
+
+  function setDropActive(active) {
+    document.body.classList.toggle("drop-active", active);
+    if (dropOverlay) dropOverlay.setAttribute("aria-hidden", String(!active));
+  }
+
+  window.addEventListener("dragenter", event => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();
+    dragDepth++;
+    setDropActive(true);
+  });
+
+  // Must be prevented everywhere, otherwise the browser opens the file
+  // instead of letting us read it.
+  window.addEventListener("dragover", event => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  });
+
+  window.addEventListener("dragleave", event => {
+    if (!carriesFiles(event)) return;
+    const outside = event.clientX <= 0 || event.clientY <= 0
+      || event.clientX >= window.innerWidth - 1 || event.clientY >= window.innerHeight - 1;
+    dragDepth = outside ? 0 : Math.max(0, dragDepth - 1);
+    if (!dragDepth) setDropActive(false);
+  });
+
+  window.addEventListener("drop", event => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();
+    dragDepth = 0;
+    setDropActive(false);
+    const files = event.dataTransfer ? Array.from(event.dataTransfer.files || []) : [];
+    const stl = files.find(file => /\.stl$/i.test(file.name)) || files[0];
+    if (!stl) {
+      showToast("That drop didn't contain a file.");
+      return;
+    }
+    importStlFile(stl);
+  });
+
+  window.addEventListener("dragend", () => {
+    dragDepth = 0;
+    setDropActive(false);
+  });
+
   new ResizeObserver(resizeCanvas).observe(stage);
 
   loadInitialState();
@@ -1794,6 +2022,10 @@
     draw: () => drawMesh(),
     shareCode: () => encodeShare(state),
     fit: () => ({ side: { ...sideView }, three: fit3d ? { ...fit3d } : null }),
+    stlBuffer: () => buildStlBuffer().buffer,
+    readStl: buffer => readStlParameters(buffer),
+    importStl: async file => importStlFile(file),
+    importParams: params => applyImportedParams(params),
     renderer: () => gl ? "webgl" : "canvas2d",
     set: (key, value) => {
       const select = document.getElementById(`select-${key}`);
