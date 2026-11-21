@@ -65,7 +65,9 @@
     .parameter { padding: 9px 0 8px; }
     .parameter + .parameter { border-top: 1px solid #eff0ed; }
     .parameter-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-    .parameter label { font-size: 13px; font-weight: 620; }
+    .parameter label, .parameter .parameter-label { font-size: 13px; font-weight: 620; }
+    .parameter.is-disabled { opacity: .42; }
+    .parameter.is-disabled input { cursor: not-allowed; }
     .number-wrap { position: relative; flex: 0 0 84px; }
     .number-wrap input {
       width: 100%; height: 31px; padding: 4px 28px 4px 8px; border: 1px solid var(--line); border-radius: 7px;
@@ -74,12 +76,21 @@
     }
     .number-wrap input::-webkit-inner-spin-button, .number-wrap input::-webkit-outer-spin-button { appearance: none; margin: 0; }
     .number-wrap span { position: absolute; right: 8px; top: 8px; color: #929a96; font-size: 10px; pointer-events: none; }
-    .select-wrap { flex: 0 0 110px; }
-    .select-wrap select {
-      width: 100%; height: 31px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 7px;
-      background: var(--soft); color: var(--ink); font-size: 12px; font-weight: 680; cursor: pointer;
+    /* Segmented switch: flat / arched etc. */
+    .segmented {
+      display: inline-flex; gap: 2px; padding: 2px; flex: 0 0 auto;
+      background: #eceee8; border-radius: 999px;
     }
-    .select-wrap select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .segmented button {
+      appearance: none; border: 0; background: transparent; color: var(--muted);
+      padding: 5px 11px; border-radius: 999px; font-size: 11.5px; font-weight: 700;
+      letter-spacing: .01em; cursor: pointer; transition: background .14s, color .14s, box-shadow .14s;
+    }
+    .segmented button:hover { color: var(--ink); }
+    .segmented button[aria-checked="true"] {
+      background: white; color: var(--ink); box-shadow: 0 1px 3px rgba(35, 48, 42, .16);
+    }
+    .segmented button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     .range {
       --fill: 50%;
       display: block; width: 100%; height: 16px; margin: 5px 0 0; padding: 0;
@@ -569,15 +580,13 @@
       }
       if (def.type === "select") {
         const options = def.options
-          .map(option => `<option value="${option.value}"${option.value === def.value ? " selected" : ""}>${option.label}</option>`)
+          .map(option => `<button type="button" role="radio" data-value="${option.value}" aria-checked="${option.value === def.value}">${option.label}</button>`)
           .join("");
         html += `
         <div class="parameter">
           <div class="parameter-top">
-            <label for="select-${def.key}">${def.label}</label>
-            <div class="select-wrap">
-              <select id="select-${def.key}" data-key="${def.key}" aria-label="${def.label}">${options}</select>
-            </div>
+            <span class="parameter-label" id="label-${def.key}">${def.label}</span>
+            <div class="segmented" id="segmented-${def.key}" data-key="${def.key}" role="radiogroup" aria-labelledby="label-${def.key}">${options}</div>
           </div>
         </div>`;
         continue;
@@ -598,18 +607,21 @@
     }
     controlsRoot.innerHTML = html;
 
-    controlsRoot.querySelectorAll("select").forEach(select => {
-      select.addEventListener("change", () => {
-        state[select.dataset.key] = select.value;
-        render();
-        saveState();
+    controlsRoot.querySelectorAll(".segmented").forEach(group => {
+      group.addEventListener("click", event => {
+        const button = event.target.closest("button[data-value]");
+        if (!button) return;
+        state[group.dataset.key] = button.dataset.value;
+        requestRender();
+        requestSave();
       });
     });
     controlsRoot.querySelectorAll(".range").forEach(input => {
       input.addEventListener("input", () => {
         state[input.dataset.key] = Number(input.value);
-        render();
-        saveState();
+        noteInteraction();
+        requestRender();
+        requestSave();
       });
     });
     controlsRoot.querySelectorAll('input[type="number"]').forEach(input => {
@@ -620,13 +632,14 @@
         const hi = Math.min(def.max, lim.max);
         const parsed = Number(input.value);
         state[def.key] = Number.isFinite(parsed) ? clamp(parsed, lo, Math.max(lo, hi)) : defaults[def.key];
-        render();
-        saveState();
+        noteInteraction();
+        requestRender();
+        requestSave();
       });
     });
   }
 
-  function buildGeometry(s) {
+  function buildGeometry(s, detail = 1) {
     const t = s.thickness;
     const R = clamp(s.cornerRadius, 0, t);
     const ro = clamp(s.edgeRadius, 0, Math.min(s.outWidth / 2, t / 2));
@@ -668,15 +681,15 @@
     // must carry the same number of vertices, so these may only depend on
     // parameters, never on the slice's edge setback.
     const seg = {
-      hook: chordSegments(Math.PI * (r + t), 0.22, 32, 520),
-      corner: chordSegments((Math.PI / 2) * R, 0.32, 12, 180),
-      tip: chordSegments((Math.PI / 2) * rt, 0.22, 12, 140),
-      arch: chordSegments(halfEllipseLength(W / 2, rise), 0.4, 16, 360)
+      hook: chordSegments(Math.PI * (r + t), 0.22 / detail, Math.round(32 * detail), Math.round(520 * detail)),
+      corner: chordSegments((Math.PI / 2) * R, 0.32 / detail, Math.round(12 * detail), Math.round(180 * detail)),
+      tip: chordSegments((Math.PI / 2) * rt, 0.22 / detail, Math.round(12 * detail), Math.round(140 * detail)),
+      arch: chordSegments(halfEllipseLength(W / 2, rise), 0.4 / detail, Math.round(16 * detail), Math.round(360 * detail))
     };
 
     return {
       W, B, F, r, t, R, ro, rt, re, cx, cy, innerFrontX,
-      minX, maxX, maxY, mouthGap, tipInset, seg,
+      minX, maxX, maxY, mouthGap, tipInset, seg, detail,
       backLegAngle: angle, delta, sinD, cosD,
       backInnerBottom, backOuterBottom,
       outWidth: s.outWidth,
@@ -890,12 +903,13 @@
     const half = g.outWidth / 2;
     const radii = [g.re, g.ro].filter(rad => rad > 1e-9);
     if (!radii.length) return [-half, half];
+    const detail = g.detail || 1;
     const pos = new Set([0, half]);
     for (const rad of radii) {
       const inner = Math.max(0, half - rad);
       // Round the out-of-plane edges with a fine enough chord to read as a
       // fillet rather than a chamfer.
-      const k = clamp(Math.ceil((Math.PI / 2) * rad / 0.28), 12, 40);
+      const k = clamp(Math.ceil((Math.PI / 2) * rad / (0.28 / detail)), Math.round(12 * detail), Math.round(40 * detail));
       pos.add(inner);
       for (let i = 0; i <= k; i++) {
         const phi = (i / k) * Math.PI / 2;
@@ -1006,7 +1020,7 @@
   }
 
   function buildSlices(g) {
-    const key = JSON.stringify([g.W, g.B, g.F, g.r, g.t, g.R, g.ro, g.rt, g.re, g.outWidth, g.arched, g.rise, Number(g.delta.toFixed(9))]);
+    const key = JSON.stringify([g.W, g.B, g.F, g.r, g.t, g.R, g.ro, g.rt, g.re, g.outWidth, g.arched, g.rise, Number(g.delta.toFixed(9)), g.detail]);
     if (sliceCache.key === key) return sliceCache.value;
     const zs = sliceZValues(g);
     const slices = zs.map(z => {
@@ -1055,10 +1069,10 @@
     return tris;
   }
 
-  function getMesh() {
-    const key = JSON.stringify(state);
+  function getMesh(detail = 1) {
+    const key = `${JSON.stringify(state)}|${detail}`;
     if (meshCache.key === key) return meshCache.value;
-    const g = buildGeometry(state);
+    const g = buildGeometry(state, detail);
     const { slices } = buildSlices(g);
     const half = g.outWidth / 2;
     const centerX = (g.minX + g.maxX) / 2;
@@ -1155,11 +1169,65 @@
     html += `<circle cx="${fmt(cx)}" cy="${fmt(cy)}" r=".9" fill="#68766f" stroke="none"/>`;
     html += dimensionLine(cx, cy, cx, cy + r);
     html += label(cx + 8, cy + r * .56, `R ${fmt(r)}`, 'text-anchor="start"');
+
+    // Mouth gap: the clear width across the two leg ends, drawn straight
+    // across at the back leg's end, matching the stat panel.
+    const mouthLeft = g.tipInset;
+    const mouthRight = g.innerFrontX - g.tipInset;
+    const mouthY = g.backInnerBottom.y + 7;
+    html += extensionLine(mouthLeft, g.backInnerBottom.y, mouthLeft, mouthY + 3.5);
+    if (cy < mouthY - 2) html += extensionLine(mouthRight, cy, mouthRight, mouthY + 3.5);
+    html += dimensionLine(mouthLeft, mouthY, mouthRight, mouthY);
+    html += label((mouthLeft + mouthRight) / 2, mouthY - 3.5, `${fmt(g.mouthGap, 2)} · MOUTH`);
     dimensions.innerHTML = html;
   }
 
   function applySideView() {
     profileSvg.setAttribute("viewBox", `${sideView.x} ${sideView.y} ${sideView.w} ${sideView.h}`);
+  }
+
+  // ---- Render scheduling -------------------------------------------------
+  // Slider drags fire many times per frame, so heavy work is coalesced: one
+  // render per animation frame, the volume sweep after the drag settles, and
+  // the localStorage write last. The 3D mesh drops to half density while the
+  // user is actively moving a control, then refines once they stop.
+  const INTERACTION_MS = 220;
+  let statsTimer = null;
+  let saveTimer = null;
+  let refineTimer = null;
+  let lastInputAt = -Infinity;
+
+  function noteInteraction() {
+    lastInputAt = performance.now();
+    if (mode === "3d") {
+      clearTimeout(refineTimer);
+      refineTimer = setTimeout(() => { drawMesh(); }, INTERACTION_MS + 40);
+    }
+  }
+
+  function requestRender() {
+    // The fast path is only geometry + SVG, a couple of milliseconds, so it is
+    // safe to run inline; the expensive volume sweep is deferred separately.
+    render();
+  }
+
+  function requestSave() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveState, 250);
+  }
+
+  function meshDetail() {
+    return performance.now() - lastInputAt < INTERACTION_MS ? 0.45 : 1;
+  }
+
+  function scheduleVolume() {
+    clearTimeout(statsTimer);
+    statsTimer = setTimeout(() => {
+      statsTimer = null;
+      const g = currentGeometry || buildGeometry(state);
+      const { volume } = buildSlices(g);
+      document.getElementById("materialVolume").innerHTML = `${fmt(volume / 1000, 1)} <small>cm³</small>`;
+    }, 90);
   }
 
   // Client pixel -> SVG user coordinate, accounting for preserveAspectRatio="meet".
@@ -1178,8 +1246,13 @@
 
     for (const def of definitions) {
       if (def.type === "select") {
-        const select = document.getElementById(`select-${def.key}`);
-        if (select) select.value = state[def.key];
+        const group = document.getElementById(`segmented-${def.key}`);
+        if (group) {
+          for (const button of group.children) {
+            const active = String(button.dataset.value === state[def.key]);
+            if (button.getAttribute("aria-checked") !== active) button.setAttribute("aria-checked", active);
+          }
+        }
         continue;
       }
       const number = document.getElementById(`number-${def.key}`);
@@ -1191,10 +1264,20 @@
       number.max = hi;
       range.min = lo;
       range.max = hi;
-      number.value = fmt(state[def.key]);
-      range.value = state[def.key];
+      const text = fmt(state[def.key]);
+      if (number.value !== text) number.value = text;
+      if (range.value !== String(state[def.key])) range.value = state[def.key];
       const fill = (state[def.key] - lo) / Math.max(.0001, hi - lo) * 100;
       range.style.setProperty("--fill", `${Math.max(0, Math.min(100, fill))}%`);
+
+      // Arch rise only means something for an arched roof.
+      const disabled = def.key === "archRise" && state.roofProfile !== "arched";
+      if (number.disabled !== disabled) {
+        number.disabled = disabled;
+        range.disabled = disabled;
+        const row = number.closest(".parameter");
+        if (row) row.classList.toggle("is-disabled", disabled);
+      }
     }
 
     hookProfile.setAttribute("d", pathFromCommands(buildCommands(g, 0)));
@@ -1213,11 +1296,10 @@
     }
     applySideView();
 
-    const { volume } = buildSlices(g);
     document.getElementById("overallWidth").innerHTML = `${fmt(g.maxX - g.minX, 1)} <small>mm</small>`;
     document.getElementById("overallHeight").innerHTML = `${fmt(g.maxY - g.roofTopY, 1)} <small>mm</small>`;
     document.getElementById("mouthGap").innerHTML = `${fmt(g.mouthGap, 2)} <small>mm</small>`;
-    document.getElementById("materialVolume").innerHTML = `${fmt(volume / 1000, 1)} <small>cm³</small>`;
+    scheduleVolume();
 
     // Zero-clearance panel: the tip must deflect by the mouth underfit.
     // Fixed-root cantilever, rectangular section: surface strain = 1.5 * t * deflection / L^2.
@@ -1242,7 +1324,7 @@
     strainVerdict.textContent = verdict;
     strainVerdict.className = `strain-verdict ${strainClass}`;
 
-    if (mode === "3d") requestAnimationFrame(drawMesh);
+    if (mode === "3d") requestAnimationFrame(() => drawMesh());
   }
 
   function setMode(nextMode) {
@@ -1717,7 +1799,17 @@
 
   function buildSmoothNormals(items) {
     const faceNormals = items.map(item => normal(item.pts));
-    const keyOf = p => `${Math.round(p[0] * 1e4)},${Math.round(p[1] * 1e4)},${Math.round(p[2] * 1e4)}`;
+    // Positions are welded at 0.01 mm, which is far below the facet size, and
+    // packed into one integer so the vertex lookup avoids string building.
+    const KEY_SCALE = 100;
+    const KEY_OFFSET = 40000;
+    const KEY_BASE = 80001;
+    const keyOf = p => {
+      const x = Math.round(p[0] * KEY_SCALE) + KEY_OFFSET;
+      const y = Math.round(p[1] * KEY_SCALE) + KEY_OFFSET;
+      const z = Math.round(p[2] * KEY_SCALE) + KEY_OFFSET;
+      return (x * KEY_BASE + y) * KEY_BASE + z;
+    };
     const buckets = new Map();
     items.forEach((item, index) => {
       for (const p of item.pts) {
@@ -1896,7 +1988,7 @@
   function drawMesh() {
     if (mode !== "3d" || !canvas.width) return;
     let mesh;
-    try { mesh = getMesh(); }
+    try { mesh = getMesh(meshDetail()); }
     catch (error) { showToast(error.message); return; }
     if (gl) drawGL(mesh);
     else if (fallbackCtx) draw2D(mesh);
@@ -2082,6 +2174,7 @@
     geometry: () => buildGeometry(state),
     slices: () => buildSlices(buildGeometry(state)),
     mesh: () => getMesh(),
+    meshAt: detail => getMesh(detail),
     strain: () => {
       const g = buildGeometry(state);
       return 1.5 * g.t * Math.max(0, g.W - g.mouthGap) / (g.B * g.B);
@@ -2095,11 +2188,12 @@
     importStl: async file => importStlFile(file),
     importParams: params => applyImportedParams(params),
     renderer: () => gl ? "webgl" : "canvas2d",
+    lod: () => meshDetail(),
     set: (key, value) => {
-      const select = document.getElementById(`select-${key}`);
-      if (select) {
-        select.value = value;
-        select.dispatchEvent(new Event("change", { bubbles: true }));
+      const group = document.getElementById(`segmented-${key}`);
+      if (group) {
+        const button = Array.from(group.children).find(node => node.dataset.value === String(value));
+        if (button) button.click();
         return;
       }
       const input = document.getElementById(`number-${key}`);
